@@ -8,7 +8,11 @@ public class SherpaSmokeTests
     [Trait("Category", "Manual")]
     public async Task Piper_voice_downloads_and_produces_audio()
     {
-        var store = new ModelStore(AppPaths.Models, new HttpClient { Timeout = TimeSpan.FromMinutes(10) });
+        // Not AppPaths.Models: the test run redirects MDREADER_HOME to a temp folder, and a manual
+        // run should install the voice where the app looks for it.
+        var models = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdReader\\models");
+        var store = new ModelStore(models, new HttpClient { Timeout = TimeSpan.FromMinutes(10) });
         if (!store.IsInstalled(VoiceCatalog.Piper))
             await store.InstallAsync(VoiceCatalog.Piper, null, CancellationToken.None);
 

@@ -6,6 +6,9 @@ public sealed class ReadingQueue
 {
     public const int LookAhead = 3;
 
+    /// <summary>Synthesis failures in a row after which reading pauses instead of skipping on.</summary>
+    public const int MaxConsecutiveFailures = 3;
+
     private readonly object _gate = new();
     private readonly ITtsEngine _tts;
     private readonly IAudioOutput _output;
@@ -19,6 +22,10 @@ public sealed class ReadingQueue
     private Task _run = Task.CompletedTask;
     private ReadingState _state = ReadingState.Idle;
     private int _index;
+    // Guarded by _gate. Fields rather than locals so that separate runs started by
+    // single-sentence appends still count towards one streak.
+    private int _failStreak;
+    private int _failStreakStart;
 
     public ReadingQueue(
         ITtsEngine tts,
@@ -78,6 +85,7 @@ public sealed class ReadingQueue
             }
             else if (_state == ReadingState.Idle && _sentences.Count > 0)
             {
+                _failStreak = 0;
                 StartLocked(_index < _sentences.Count ? _index : 0);
             }
         }
@@ -106,6 +114,7 @@ public sealed class ReadingQueue
         {
             var index = _sentences.FindIndex(s => s.Id == sentenceId);
             if (index < 0) return false;
+            _failStreak = 0;
             StartLocked(index);
         }
         RaiseState();
@@ -127,6 +136,7 @@ public sealed class ReadingQueue
             stale = _synthCts;
             _synthCts = new CancellationTokenSource();
             _clips.Clear();
+            _failStreak = 0;
         }
         // Cancel outside the lock and after the swap: cancellation can resume the run loop
         // inline on this thread, and it must then see the new token and raise events unlocked.
@@ -138,6 +148,8 @@ public sealed class ReadingQueue
         lock (_gate)
         {
             if (_sentences.Count == 0) return;
+            // A deliberate move starts afresh: a stall must never rewind to a pre-move position.
+            _failStreak = 0;
             var target = Math.Max(0, _index + delta);
             if (target >= _sentences.Count)
             {
@@ -183,7 +195,18 @@ public sealed class ReadingQueue
         _synthCts = new CancellationTokenSource();
         stale.Cancel();
         _index = 0;
+        _failStreak = 0;
+        _failStreakStart = 0;
         _state = ReadingState.Idle;
+    }
+
+    /// <summary>Forgets failed syntheses so the sentences are attempted again when reading resumes.</summary>
+    private void DropFaultedClipsLocked()
+    {
+        foreach (var id in _clips.Keys.ToList())
+        {
+            if (_clips[id].IsFaulted) _clips.Remove(id);
+        }
     }
 
     private void CancelRunLocked()
@@ -296,6 +319,7 @@ public sealed class ReadingQueue
             try
             {
                 clip = await clipTask.WaitAsync(ct);
+                lock (_gate) { if (!ct.IsCancellationRequested) _failStreak = 0; }
             }
             catch (OperationCanceledException)
             {
@@ -310,9 +334,48 @@ public sealed class ReadingQueue
             }
             catch (Exception ex)
             {
-                lock (_gate) _clips.Remove(sentence.Id);
                 var failedId = sentence.Id;
-                Raise(() => SentenceFailed?.Invoke(failedId, ex));
+                bool hold = false, stall = false;
+                lock (_gate)
+                {
+                    if (_clips.TryGetValue(sentence.Id, out var cached) && cached == clipTask)
+                        _clips.Remove(sentence.Id);
+                    if (ct.IsCancellationRequested) return;
+                    if (_pause is not null)
+                    {
+                        // Paused: nothing is skipped behind the user's back. Play retries this
+                        // sentence, and the look-ahead that failed alongside it.
+                        hold = true;
+                        DropFaultedClipsLocked();
+                    }
+                    else
+                    {
+                        if (_failStreak == 0) _failStreakStart = i;
+                        if (++_failStreak >= MaxConsecutiveFailures)
+                        {
+                            // The voice is probably unavailable: stop consuming the document and
+                            // go back to where the failures began; Play retries from there.
+                            _failStreak = 0;
+                            i = _index = Math.Min(_failStreakStart, i);
+                            _state = ReadingState.Paused;
+                            _pause = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                            DropFaultedClipsLocked();
+                            stall = true;
+                        }
+                    }
+                }
+                if (!hold) Raise(() => SentenceFailed?.Invoke(failedId, ex));
+                if (stall)
+                {
+                    Raise(() => StateChanged?.Invoke(ReadingState.Paused));
+                    Raise(() => PlaybackFailed?.Invoke(ex));
+                }
+                if (hold || stall)
+                {
+                    try { await WaitWhilePausedAsync(ct); }
+                    catch (OperationCanceledException) { return; }
+                    continue; // retry the same sentence after Play
+                }
                 i++;
                 continue;
             }

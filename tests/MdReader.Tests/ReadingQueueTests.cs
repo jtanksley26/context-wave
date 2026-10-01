@@ -309,4 +309,75 @@ public class ReadingQueueTests
         Assert.Equal(new[] { 0, 1, 2 }, _started);
         Assert.Equal(3, _output.Played.Count);
     }
+
+    [Fact]
+    public async Task Three_consecutive_failures_pause_on_the_first_failed_sentence()
+    {
+        _tts.FailAll = true;
+        var queue = Create();
+        var failed = new ConcurrentQueue<int>();
+        var playbackFailed = new ConcurrentQueue<Exception>();
+        queue.SentenceFailed += (id, _) => failed.Enqueue(id);
+        queue.PlaybackFailed += playbackFailed.Enqueue;
+        queue.Load(Make(5));
+        // PlaybackFailed is the last event of a stall, raised after the state becomes Paused.
+        await TestUtil.WaitUntil(() => queue.State == ReadingState.Paused && !playbackFailed.IsEmpty);
+
+        Assert.Equal(ReadingState.Paused, queue.State);
+        Assert.Equal(0, queue.CurrentIndex);
+        Assert.Single(playbackFailed);
+        Assert.Equal(new[] { 0, 1, 2 }, failed);
+        Assert.Empty(_started);
+        Assert.Empty(_output.Played);
+        queue.Stop();
+    }
+
+    [Fact]
+    public async Task Play_after_a_failure_stall_retries_from_the_first_failed_sentence()
+    {
+        _tts.FailAll = true;
+        var queue = Create();
+        var playbackFailed = new ConcurrentQueue<Exception>();
+        queue.PlaybackFailed += playbackFailed.Enqueue;
+        var finished = NextFinished(queue);
+        queue.Load(Make(5));
+        await TestUtil.WaitUntil(() => queue.State == ReadingState.Paused && !playbackFailed.IsEmpty);
+
+        _tts.FailAll = false;
+        queue.Play();
+        await finished;
+
+        Assert.Equal(new[] { 0, 1, 2, 3, 4 }, _started);
+        Assert.Single(playbackFailed);
+        Assert.Equal(ReadingState.Idle, queue.State);
+    }
+
+    [Fact]
+    public async Task Synthesis_failure_while_paused_is_retried_not_skipped()
+    {
+        _tts.Gated = true;
+        var queue = Create();
+        var failed = new ConcurrentQueue<int>();
+        queue.SentenceFailed += (id, _) => failed.Enqueue(id);
+        queue.Load(Make(3));
+        await TestUtil.WaitUntil(() => _tts.PendingCount == 3);
+
+        queue.Pause();
+        _tts.Fault("Sentence 0.");
+        // Nothing observable happens while the queue holds the failed sentence, so give the
+        // run loop time to see the fault; a skip would show up as SentenceFailed here or below.
+        await Task.Delay(150);
+        Assert.Empty(failed);
+        Assert.Equal(ReadingState.Paused, queue.State);
+        Assert.Equal(0, queue.CurrentIndex);
+
+        _tts.Gated = false;
+        queue.Play();
+        await TestUtil.WaitUntil(() => !_started.IsEmpty);
+
+        Assert.Equal(0, _started.First());
+        Assert.Empty(failed);
+        Assert.Equal(2, _tts.CallCount("Sentence 0."));
+        queue.Stop();
+    }
 }

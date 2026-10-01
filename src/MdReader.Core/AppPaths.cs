@@ -2,8 +2,13 @@ namespace MdReader.Core;
 
 public static class AppPaths
 {
+    /// <summary>Environment variable that, when set and non-empty, replaces the default data folder.</summary>
+    public const string HomeVariable = "MDREADER_HOME";
+
     public static string Root =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdReader");
+        Environment.GetEnvironmentVariable(HomeVariable) is { Length: > 0 } home
+            ? home
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdReader");
 
     public static string Models => Path.Combine(Root, "models");
     public static string Logs => Path.Combine(Root, "logs");

@@ -19,6 +19,11 @@ internal sealed class FakeTts : ITtsEngine
     public ConcurrentQueue<(string Text, VoiceSettings Voice)> Calls { get; } = new();
     public HashSet<string> FailOn { get; } = [];
 
+    private volatile bool _failAll;
+
+    /// <summary>When true, every SynthesizeAsync fails immediately; may be switched off later.</summary>
+    public bool FailAll { get => _failAll; set => _failAll = value; }
+
     /// <summary>When true, each SynthesizeAsync stays pending until Release(text) is called or its token is cancelled.</summary>
     public bool Gated { get; set; }
 
@@ -48,10 +53,18 @@ internal sealed class FakeTts : ITtsEngine
         foreach (var call in calls) call.Completion.TrySetResult(new AudioClip([text.Length], 24000));
     }
 
+    /// <summary>Faults every pending gated call for this text.</summary>
+    public void Fault(string text)
+    {
+        List<GatedCall> calls;
+        lock (_lock) calls = _gated.Where(c => c.Text == text).ToList();
+        foreach (var call in calls) call.Completion.TrySetException(new InvalidOperationException("synth failed"));
+    }
+
     public Task<AudioClip> SynthesizeAsync(string text, VoiceSettings voice, CancellationToken ct)
     {
         Calls.Enqueue((text, voice));
-        if (FailOn.Contains(text))
+        if (FailAll || FailOn.Contains(text))
             return Task.FromException<AudioClip>(new InvalidOperationException("synth failed"));
         if (!Gated) return Task.FromResult(new AudioClip([text.Length], 24000));
 
