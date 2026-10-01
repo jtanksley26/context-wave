@@ -60,4 +60,38 @@ public class AppLinkTests
             () => link.SendAsync(new PipeRequest { Op = "status" }));
         Assert.Contains("did not start", ex.Message);
     }
+
+    [Fact]
+    public async Task Concurrent_calls_launch_the_app_only_once()
+    {
+        var name = NewName();
+        PipeServer? server = null;
+        var launches = 0;
+        var link = new AppLink(name, () =>
+        {
+            // Only the first launch brings a server up; a second launch would be the bug.
+            if (Interlocked.Increment(ref launches) == 1)
+            {
+                var started = Echo(name);
+                started.Start();
+                Volatile.Write(ref server, started);
+            }
+            return true;
+        }, TimeSpan.FromSeconds(5));
+
+        try
+        {
+            var responses = await Task.WhenAll(
+                link.SendAsync(new PipeRequest { Op = "status" }),
+                link.SendAsync(new PipeRequest { Op = "stop" }));
+
+            Assert.Equal("status", responses[0].Result!.Message);
+            Assert.Equal("stop", responses[1].Result!.Message);
+            Assert.Equal(1, Volatile.Read(ref launches));
+        }
+        finally
+        {
+            Volatile.Read(ref server)?.Dispose();
+        }
+    }
 }
