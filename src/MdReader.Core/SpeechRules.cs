@@ -9,7 +9,9 @@ public static partial class SpeechRules
     public const int ListItemPauseMs = 200;
     public const string CodeBlockAnnouncement = "code block";
 
-    [GeneratedRegex("</?[A-Za-z][^>]*>|<!--.*?-->")]
+    [GeneratedRegex(
+        @"</?(?:a|b|blockquote|br|code|details|div|em|h[1-6]|hr|i|img|kbd|li|ol|p|pre|s|script|span|strong|style|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul)\b[^>]*>|<!--.*?-->",
+        RegexOptions.IgnoreCase)]
     private static partial Regex HtmlTag();
 
     [GeneratedRegex(@"https?://\S+")]

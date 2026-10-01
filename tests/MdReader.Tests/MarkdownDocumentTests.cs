@@ -100,6 +100,35 @@ public class MarkdownDocumentTests
     public void Raw_html_is_escaped() =>
         Assert.DoesNotContain("<script>", Parse("<script>alert(1)</script>\n\nHi.").Html);
 
+    [Theory]
+    [InlineData("[click](javascript:alert(1))")]
+    [InlineData("[click](JaVaScRiPt:alert(1))")]
+    [InlineData("[click](vbscript:msgbox(1))")]
+    [InlineData("[click](data:text/html,hi)")]
+    [InlineData("<javascript:alert(1)>")]
+    [InlineData("![x](javascript:alert(1))")]
+    public void Unsafe_link_urls_never_reach_the_html(string markdown)
+    {
+        var html = Parse(markdown).Html;
+        Assert.DoesNotContain("javascript:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("vbscript:", html, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("data:", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Safe_link_urls_are_kept()
+    {
+        var html = Parse("[a](https://example.com/x) [b](mailto:me@example.com) [c](docs/page.md) [d](#top)").Html;
+        Assert.Contains("href=\"https://example.com/x\"", html);
+        Assert.Contains("href=\"mailto:me@example.com\"", html);
+        Assert.Contains("href=\"docs/page.md\"", html);
+        Assert.Contains("href=\"#top\"", html);
+    }
+
+    [Fact]
+    public void Empty_table_cell_does_not_leave_a_dangling_comma() =>
+        Assert.Equal(new[] { "A, B", "1" }, Spoken(Parse("| A | B |\n|---|---|\n| 1 |  |")));
+
     [Fact]
     public void Append_continues_ids_and_returns_only_the_new_part()
     {

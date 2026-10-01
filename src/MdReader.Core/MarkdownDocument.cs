@@ -31,9 +31,15 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true)
     public IReadOnlyList<Sentence> Sentences => _sentences;
     public string Html => _html.ToString();
 
+    /// <summary>
+    /// Parses <paramref name="markdown"/> and appends its sentences and HTML. Each call is parsed
+    /// independently, so callers should pass whole blocks (complete paragraphs, lists, fenced code
+    /// blocks), not fragments.
+    /// </summary>
     public AppendResult Append(string markdown)
     {
         var ast = Markdown.Parse(markdown, Pipeline);
+        SanitizeLinks(ast);
         var added = new List<Sentence>();
         var pieces = new Dictionary<Inline, List<SpanPiece>>();
         foreach (var block in ast) Visit(block, added, pieces, inListItem: false);
@@ -51,6 +57,34 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true)
         _sentences.AddRange(added);
         _html.Append(html);
         return new AppendResult(added, html);
+    }
+
+    private static void SanitizeLinks(MarkdownObject root)
+    {
+        foreach (var node in root.Descendants())
+        {
+            switch (node)
+            {
+                case LinkInline link when !IsSafeUrl(link.Url):
+                    link.Url = "";
+                    break;
+                case AutolinkInline auto when !IsSafeUrl(auto.Url):
+                    auto.Url = "";
+                    break;
+            }
+        }
+    }
+
+    private static bool IsSafeUrl(string? url)
+    {
+        var trimmed = (url ?? "").Trim();
+        var end = trimmed.IndexOfAny(['/', '?', '#']);
+        var colon = trimmed.IndexOf(':');
+        if (colon < 0 || (end >= 0 && end < colon)) return true; // no scheme: relative path or fragment
+        var scheme = trimmed[..colon].Trim();
+        return scheme.Equals("http", StringComparison.OrdinalIgnoreCase)
+            || scheme.Equals("https", StringComparison.OrdinalIgnoreCase)
+            || scheme.Equals("mailto", StringComparison.OrdinalIgnoreCase);
     }
 
     private void Visit(Block block, List<Sentence> added, Dictionary<Inline, List<SpanPiece>> pieces, bool inListItem)
@@ -100,9 +134,15 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true)
         var segments = new List<Segment>();
         foreach (var cell in row.OfType<TableCell>())
         {
-            if (plain.Length > 0) plain.Append(", ");
+            var cellText = new StringBuilder();
+            var cellSegments = new List<Segment>();
             foreach (var paragraph in cell.Descendants<ParagraphBlock>())
-                Collect(paragraph.Inline, plain, segments);
+                Collect(paragraph.Inline, cellText, cellSegments);
+            if (cellText.ToString().Trim().Length == 0) continue;
+            if (plain.Length > 0) plain.Append(", ");
+            var offset = plain.Length;
+            plain.Append(cellText);
+            foreach (var s in cellSegments) segments.Add(s with { Start = s.Start + offset });
         }
         var text = plain.ToString();
         AddSentences(text, [new TextRange(0, text.Length)], segments, SpeechRules.ParagraphPauseMs, added, pieces);

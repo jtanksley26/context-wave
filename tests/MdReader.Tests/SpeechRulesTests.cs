@@ -11,6 +11,8 @@ public class SpeechRulesTests
     [InlineData("  spaced \n\t out  ", "spaced out")]
     [InlineData("if a < b and c > d", "if a < b and c > d")]
     [InlineData("Line<br/>break </p>end <!-- note --> here", "Linebreak end here")]
+    [InlineData("Use List<int> and Dictionary<string, int> here.", "Use List<int> and Dictionary<string, int> here.")]
+    [InlineData("A<BR>B <Span class=\"x\">C</Span>", "AB C")]
     public void Clean_removes_unspeakable_content(string input, string expected) =>
         Assert.Equal(expected, SpeechRules.Clean(input));
 
