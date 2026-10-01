@@ -16,9 +16,14 @@ public sealed class Settings
         try
         {
             if (File.Exists(path))
-                return JsonSerializer.Deserialize<Settings>(File.ReadAllText(path)) ?? new Settings();
+            {
+                var loaded = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path)) ?? new Settings();
+                if (string.IsNullOrEmpty(loaded.ModelId)) loaded.ModelId = "kokoro-en-v0_19";
+                if (loaded.SpeakerId < 0) loaded.SpeakerId = 0;
+                return loaded;
+            }
         }
-        catch (Exception ex) when (ex is JsonException or IOException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
         }
         return new Settings();

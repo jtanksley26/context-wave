@@ -27,7 +27,7 @@ public static class FileLog
                     $"{DateTime.Now:HH:mm:ss} {message}{Environment.NewLine}");
             }
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Logging must never take the app down.
         }

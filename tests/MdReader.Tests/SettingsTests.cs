@@ -36,6 +36,25 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void Null_model_id_and_negative_speaker_fall_back_to_safe_values()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(File_)!);
+        File.WriteAllText(File_, "{\"ModelId\":null,\"SpeakerId\":-3}");
+        var settings = Settings.Load(File_);
+        Assert.Equal("kokoro-en-v0_19", settings.ModelId);
+        Assert.Equal(0, settings.SpeakerId);
+    }
+
+    [Fact]
+    public void Unreadable_path_gives_defaults()
+    {
+        Directory.CreateDirectory(File_);
+        var settings = Settings.Load(File_);
+        Assert.Equal("kokoro-en-v0_19", settings.ModelId);
+        Assert.Equal(1, settings.SpeakerId);
+    }
+
+    [Fact]
     public void ToVoice_clamps_speed()
     {
         Assert.Equal(2.0f, new Settings { Speed = 9f }.ToVoice().Speed);
