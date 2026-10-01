@@ -48,6 +48,10 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         {
             return PipeResponse.Fail(ex.Message);
         }
+        catch (Exception ex)
+        {
+            return PipeResponse.Fail($"MD Reader could not complete the request: {ex.Message}");
+        }
     }
 
     public void OpenFile(string path)
@@ -56,16 +60,22 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         var extension = Path.GetExtension(path);
         if (!Extensions.Contains(extension))
             throw new ReaderException($"Unsupported file type '{extension}'. Use .md, .markdown or .txt.");
-        var info = new FileInfo(path);
-        if (!info.Exists) throw new ReaderException($"File not found: {path}");
-        if (info.Length > MaxFileBytes) throw new ReaderException("File is too large (limit 5 MB).");
 
         string text;
         try
         {
+            var info = new FileInfo(path);
+            if (!info.Exists) throw new ReaderException($"File not found: {path}");
+            if (info.Length > MaxFileBytes) throw new ReaderException("File is too large (limit 5 MB).");
             text = File.ReadAllText(path);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is FileNotFoundException or DirectoryNotFoundException)
+        {
+            throw new ReaderException($"File not found: {path}");
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException
+                                       or System.Security.SecurityException or IOException
+                                       or UnauthorizedAccessException)
         {
             throw new ReaderException($"Could not read the file: {ex.Message}");
         }

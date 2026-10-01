@@ -63,6 +63,30 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
+    public void ReadFile_with_an_invalid_path_fails_cleanly()
+    {
+        var response = ReadFile("C:\\a\0.md");
+        Assert.False(response.Ok);
+        Assert.Equal(0, _queue.Count);
+    }
+
+    [Fact]
+    public void OpenFile_with_an_invalid_path_throws_ReaderException()
+    {
+        Assert.Throws<ReaderException>(() => _session.OpenFile("C:\\a\0.md"));
+    }
+
+    [Fact]
+    public void ReadFile_on_a_directory_named_like_a_markdown_file_fails()
+    {
+        var folder = Path.Combine(_dir, "folder.md");
+        Directory.CreateDirectory(folder);
+        var response = ReadFile(folder);
+        Assert.False(response.Ok);
+        Assert.Contains("not found", response.Error);
+    }
+
+    [Fact]
     public void ReadFile_rejects_unsupported_extensions()
     {
         var response = ReadFile(Write("a.pdf", "x"));
