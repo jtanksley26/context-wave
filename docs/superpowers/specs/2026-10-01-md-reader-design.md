@@ -193,3 +193,17 @@ an installer package (the app runs from its build output folder).
 4. Playback controls, speed, voice selection, click-to-jump, model download.
 5. Pipe server and Bridge with the four MCP tools.
 6. `setup` registration command.
+
+## Amendments (2026-10-01, from implementation planning)
+
+- `PipeServer` lives in `MdReader.Core` rather than the App, so the pipe round trip
+  can be tested without WPF. The App supplies the request handler.
+- The pipe has a fifth, internal operation, `activate`, used when the app is launched
+  a second time to bring the existing window forward. It is not exposed as an MCP tool.
+- `ReadingQueue.Load` and `Append` take an `autoPlay` flag. A file opened from the
+  window before the voice is downloaded is displayed but not played.
+- Images are shown as alt text only; the document page does not load remote images.
+- The playback bar shows sentence position ("12 / 80") instead of elapsed time.
+- Kokoro's download is about 320 MB and Piper's about 67 MB. The Piper voice is
+  `en_US-lessac-medium`.
+- The App and the Bridge build into a shared `out/` folder at the repository root.
