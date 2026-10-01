@@ -42,7 +42,7 @@ public sealed class ReaderTools(AppLink link)
         {
             response = await link.SendAsync(request, ct);
         }
-        catch (Exception ex) when (ex is InvalidOperationException or IOException)
+        catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException or TimeoutException)
         {
             throw new McpException(ex.Message);
         }

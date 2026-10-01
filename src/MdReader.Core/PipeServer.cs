@@ -23,30 +23,40 @@ public sealed class PipeServer(string pipeName, Func<PipeRequest, Task<PipeRespo
         PipeTransmissionMode.Byte,
         PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
 
-    private async Task AcceptLoopAsync(NamedPipeServerStream pipe, CancellationToken ct)
+    private async Task AcceptLoopAsync(NamedPipeServerStream? pipe, CancellationToken ct)
     {
-        while (true)
+        while (!ct.IsCancellationRequested)
         {
             try
             {
+                pipe ??= Create();
                 await pipe.WaitForConnectionAsync(ct);
+
+                var connected = pipe;
+                pipe = null;
+                _ = Task.Run(() => ServeAsync(connected, ct));
             }
             catch (OperationCanceledException)
             {
-                pipe.Dispose();
-                return;
+                break;
             }
-            catch (IOException)
+            catch (Exception ex)
             {
-                pipe.Dispose();
-                pipe = Create();
-                continue;
+                FileLog.Write($"Pipe server error: {ex.Message}");
+                pipe?.Dispose();
+                pipe = null;
+                try
+                {
+                    await Task.Delay(200, ct);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
             }
-
-            var connected = pipe;
-            pipe = Create();
-            _ = Task.Run(() => ServeAsync(connected, ct));
         }
+
+        pipe?.Dispose();
     }
 
     private async Task ServeAsync(NamedPipeServerStream pipe, CancellationToken ct)
@@ -56,7 +66,9 @@ public sealed class PipeServer(string pipeName, Func<PipeRequest, Task<PipeRespo
             try
             {
                 using var reader = new StreamReader(pipe, PipeProtocol.Utf8, false, 4096, leaveOpen: true);
-                var line = await reader.ReadLineAsync(ct);
+                using var readTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                readTimeout.CancelAfter(TimeSpan.FromSeconds(10));
+                var line = await reader.ReadLineAsync(readTimeout.Token);
 
                 PipeResponse response;
                 try

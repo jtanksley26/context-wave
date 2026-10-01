@@ -7,12 +7,14 @@ public sealed class SherpaTtsEngine(ModelStore store) : ITtsEngine, IDisposable
     private readonly SemaphoreSlim _gate = new(1, 1);
     private OfflineTts? _tts;
     private string? _loadedModelId;
+    private bool _disposed;
 
     public async Task<AudioClip> SynthesizeAsync(string text, VoiceSettings voice, CancellationToken ct)
     {
         await _gate.WaitAsync(ct);
         try
         {
+            if (_disposed) throw new OperationCanceledException();
             return await Task.Run(() =>
             {
                 ct.ThrowIfCancellationRequested();
@@ -36,8 +38,20 @@ public sealed class SherpaTtsEngine(ModelStore store) : ITtsEngine, IDisposable
 
     public void Dispose()
     {
-        _tts?.Dispose();
-        _tts = null;
+        // If a synthesis is still running after 10 s the process is exiting anyway;
+        // leaking is safer than freeing native memory that is in use.
+        if (!_gate.Wait(TimeSpan.FromSeconds(10))) return;
+        try
+        {
+            _disposed = true;
+            _tts?.Dispose();
+            _tts = null;
+            _loadedModelId = null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     private OfflineTts GetOrLoad(string modelId)
@@ -48,6 +62,12 @@ public sealed class SherpaTtsEngine(ModelStore store) : ITtsEngine, IDisposable
             throw new InvalidOperationException($"Voice not ready: the {model.DisplayName} voice is not downloaded.");
 
         var dir = store.GetModelDir(model);
+        var incomplete = !File.Exists(Path.Combine(dir, "tokens.txt"))
+                         || !Directory.Exists(Path.Combine(dir, "espeak-ng-data"))
+                         || (model.Kind == "kokoro" && !File.Exists(Path.Combine(dir, "voices.bin")));
+        if (incomplete)
+            throw new InvalidOperationException($"Voice not ready: the {model.DisplayName} voice files are incomplete.");
+
         var config = new OfflineTtsConfig();
         if (model.Kind == "kokoro")
         {
@@ -66,6 +86,8 @@ public sealed class SherpaTtsEngine(ModelStore store) : ITtsEngine, IDisposable
         config.Model.Provider = "cpu";
 
         _tts?.Dispose();
+        _tts = null;
+        _loadedModelId = null;
         _tts = new OfflineTts(config);
         _loadedModelId = model.Id;
         return _tts;

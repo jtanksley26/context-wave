@@ -31,4 +31,44 @@ public class SherpaSmokeTests
         Assert.Contains("not ready", ex.Message);
         Directory.Delete(empty, recursive: true);
     }
+
+    [Fact]
+    public async Task Synthesize_after_Dispose_is_cancelled()
+    {
+        var empty = Directory.CreateTempSubdirectory("mdreader-disposed-").FullName;
+        try
+        {
+            var engine = new SherpaTtsEngine(new ModelStore(empty, new HttpClient()));
+            engine.Dispose();
+            engine.Dispose();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.SynthesizeAsync(
+                "Hi.", new VoiceSettings(VoiceCatalog.Piper.Id, 0, 1f), CancellationToken.None));
+        }
+        finally
+        {
+            Directory.Delete(empty, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Incomplete_model_folder_reports_voice_not_ready()
+    {
+        var root = Directory.CreateTempSubdirectory("mdreader-incomplete-").FullName;
+        try
+        {
+            var dir = Path.Combine(root, "vits-piper-en_US-lessac-medium");
+            Directory.CreateDirectory(dir);
+            File.WriteAllBytes(Path.Combine(dir, "en_US-lessac-medium.onnx"), []);
+            using var engine = new SherpaTtsEngine(new ModelStore(root, new HttpClient()));
+
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => engine.SynthesizeAsync(
+                "Hi.", new VoiceSettings(VoiceCatalog.Piper.Id, 0, 1f), CancellationToken.None));
+            Assert.Contains("not ready", ex.Message);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }

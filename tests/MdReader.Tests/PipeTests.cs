@@ -63,9 +63,27 @@ public class PipeTests
         await pipe.ConnectAsync(2000);
         await pipe.WriteAsync(PipeProtocol.Utf8.GetBytes("not json\n"));
         using var reader = new StreamReader(pipe, PipeProtocol.Utf8);
-        var line = await reader.ReadLineAsync();
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var line = await reader.ReadLineAsync(timeout.Token);
 
         Assert.Contains("\"ok\":false", line);
+    }
+
+    [Fact]
+    public async Task Server_survives_a_client_that_connects_and_closes_without_sending()
+    {
+        var name = NewName();
+        using var server = new PipeServer(name, r => Task.FromResult(PipeResponse.Success(r.Op)));
+        server.Start();
+
+        var silent = new NamedPipeClientStream(
+            ".", name, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        await silent.ConnectAsync(2000);
+        await silent.DisposeAsync();
+
+        var response = await PipeClient.SendAsync(name, new PipeRequest { Op = "ping" }, 2000);
+        Assert.True(response.Ok);
+        Assert.Equal("ping", response.Result!.Message);
     }
 
     [Fact]
