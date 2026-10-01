@@ -9,6 +9,8 @@ public class SpeechRulesTests
     [InlineData("Done \U0001F389 now ✅.", "Done now .")]
     [InlineData("Visit https://example.com/a?b=1 today.", "Visit today.")]
     [InlineData("  spaced \n\t out  ", "spaced out")]
+    [InlineData("if a < b and c > d", "if a < b and c > d")]
+    [InlineData("Line<br/>break </p>end <!-- note --> here", "Linebreak end here")]
     public void Clean_removes_unspeakable_content(string input, string expected) =>
         Assert.Equal(expected, SpeechRules.Clean(input));
 
