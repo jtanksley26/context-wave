@@ -22,8 +22,19 @@ public partial class App : Application
         _mutex = new Mutex(initiallyOwned: true, $@"Local\{PipeProtocol.DefaultPipeName}.App", out var isFirst);
         if (!isFirst)
         {
-            await HandOffToRunningInstanceAsync(file);
-            Shutdown();
+            // Always exit: a failed hand-off must not leave a windowless process holding the mutex.
+            try
+            {
+                await HandOffToRunningInstanceAsync(file);
+            }
+            catch (Exception ex)
+            {
+                FileLog.Write($"Hand-off to the running instance failed: {ex}");
+            }
+            finally
+            {
+                Shutdown();
+            }
             return;
         }
 

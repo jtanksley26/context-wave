@@ -65,7 +65,7 @@ public partial class MainWindow : Window
         _queue.PlaybackFailed += ex =>
         {
             FileLog.Write($"Playback failed: {ex}");
-            Dispatcher.InvokeAsync(() => StatusText.Text = $"Audio problem: {ex.Message} Press Play to retry.");
+            Dispatcher.InvokeAsync(() => StatusText.Text = $"Reading stopped: {ex.Message} Press Play to retry.");
         };
 
         _view.SentenceClicked += id =>
@@ -80,23 +80,32 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        await _view.InitializeAsync();
+        try
+        {
+            await _view.InitializeAsync();
 
-        foreach (var model in VoiceCatalog.All)
-            for (var i = 0; i < model.Speakers.Count; i++)
-                VoiceBox.Items.Add(new VoiceOption(model.Id, i, $"{model.DisplayName} - {model.Speakers[i]}"));
-        VoiceBox.SelectedItem = VoiceBox.Items.Cast<VoiceOption>()
-            .FirstOrDefault(v => v.ModelId == _settings.ModelId && v.SpeakerId == _settings.SpeakerId)
-            ?? VoiceBox.Items[0];
+            foreach (var model in VoiceCatalog.All)
+                for (var i = 0; i < model.Speakers.Count; i++)
+                    VoiceBox.Items.Add(new VoiceOption(model.Id, i, $"{model.DisplayName} - {model.Speakers[i]}"));
+            VoiceBox.SelectedItem = VoiceBox.Items.Cast<VoiceOption>()
+                .FirstOrDefault(v => v.ModelId == _settings.ModelId && v.SpeakerId == _settings.SpeakerId)
+                ?? VoiceBox.Items[0];
 
-        SpeedSlider.Value = _settings.ToVoice().Speed;
-        SpeedText.Text = $"{_settings.ToVoice().Speed:0.0}x";
-        AnnounceCodeItem.IsChecked = _settings.AnnounceCodeBlocks;
+            SpeedSlider.Value = _settings.ToVoice().Speed;
+            SpeedText.Text = $"{_settings.ToVoice().Speed:0.0}x";
+            AnnounceCodeItem.IsChecked = _settings.AnnounceCodeBlocks;
 
-        _ready = true;
-        UpdateBanner();
-        _pipe.Start();
-        if (_initialFile is not null) OpenPath(Path.GetFullPath(_initialFile));
+            _ready = true;
+            UpdateBanner();
+            _pipe.Start();
+            if (_initialFile is not null) OpenPath(Path.GetFullPath(_initialFile));
+        }
+        catch (Exception ex)
+        {
+            // Leave the window open so the reason can be read.
+            FileLog.Write($"Startup failed: {ex}");
+            StatusText.Text = $"MD Reader could not start: {ex.Message}";
+        }
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -221,9 +230,10 @@ public partial class MainWindow : Window
         _settings.ModelId = voice.ModelId;
         _settings.SpeakerId = voice.SpeakerId;
         SaveSettings();
-        _queue.InvalidateCache();
-        // Without the voice every sentence would fail and the queue would race to the end.
+        // Pause first: once paused, a synthesis that fails for want of the voice is held and
+        // retried on Play instead of being skipped.
         if (!VoiceReady()) _queue.Pause();
+        _queue.InvalidateCache();
         UpdateBanner();
     }
 

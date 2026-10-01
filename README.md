@@ -13,6 +13,7 @@ dotnet build MdReader.sln
 ```
 
 The app and the MCP bridge are written to `out/`. Close MD Reader before rebuilding.
+Once the bridge is registered, Claude Code and the Claude desktop app keep `out\MdReader.Bridge.exe` open, so close those sessions too before rebuilding.
 
 ## Run
 
@@ -33,6 +34,11 @@ This registers the `md-reader` MCP server with Claude Code and the Claude deskto
 (restart the desktop app afterwards). Undo it with `setup --remove`.
 
 Tools: `read_file(path)`, `speak(text, mode)`, `stop()`, `status()`.
+
+## Environment
+
+Setting `MDREADER_HOME` changes where settings, logs and voices are stored (the
+default is `%LOCALAPPDATA%\MdReader`). The tests use it to stay out of that folder.
 
 ## Test
 

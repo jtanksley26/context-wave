@@ -207,3 +207,9 @@ an installer package (the app runs from its build output folder).
 - Kokoro's download is about 320 MB and Piper's about 67 MB. The Piper voice is
   `en_US-lessac-medium`.
 - The App and the Bridge build into a shared `out/` folder at the repository root.
+- The voice selector lists every catalogue voice; choosing one that is not installed
+  shows the download banner.
+- After three consecutive synthesis failures reading pauses on the first failed
+  sentence and the status bar reports why; Play retries from that sentence.
+- The `MDREADER_HOME` environment variable overrides the data folder (settings, logs
+  and voices). The tests use it.
