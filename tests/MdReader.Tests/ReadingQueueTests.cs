@@ -225,4 +225,88 @@ public class ReadingQueueTests
         Assert.Equal(new[] { 0, 1, 2 }, _started);
         Assert.Equal(2f, _tts.Calls.Last().Voice.Speed);
     }
+
+    [Fact]
+    public async Task Jump_cancels_stale_lookahead_synthesis()
+    {
+        _tts.Gated = true;
+        _output.Manual = true;
+        var queue = Create();
+        queue.Load(Make(40));
+        await TestUtil.WaitUntil(() => _tts.PendingCount == 4);
+
+        Assert.True(queue.JumpTo(20));
+        await TestUtil.WaitUntil(() =>
+            Enumerable.Range(20, 4).All(i => _tts.CallCount($"Sentence {i}.") == 1));
+        await TestUtil.WaitUntil(() =>
+            Enumerable.Range(1, 3).All(i => _tts.WasCancelled($"Sentence {i}.")));
+
+        Assert.All(Enumerable.Range(20, 4), i => Assert.False(_tts.WasCancelled($"Sentence {i}.")));
+        Assert.Equal(8, _tts.Calls.Count);
+
+        _tts.Release("Sentence 20.");
+        await TestUtil.WaitUntil(() => _started.Contains(20) && _output.Pending);
+        Assert.Equal(new[] { 20 }, _started);
+        queue.Stop();
+    }
+
+    [Fact]
+    public async Task Next_keeps_already_synthesized_neighbours()
+    {
+        _output.Manual = true;
+        var queue = Create();
+        queue.Load(Make(6));
+        await TestUtil.WaitUntil(() => _output.Pending && _tts.Calls.Count == 4);
+
+        queue.Next();
+        await TestUtil.WaitUntil(() => _started.LastOrDefault() == 1 && _output.Pending);
+        await TestUtil.WaitUntil(() => _tts.CallCount("Sentence 4.") == 1);
+
+        Assert.Equal(1, _tts.CallCount("Sentence 1."));
+        Assert.Equal(1, _tts.CallCount("Sentence 2."));
+        Assert.Equal(1, _tts.CallCount("Sentence 3."));
+        Assert.Equal(1, _tts.CallCount("Sentence 4."));
+        Assert.Equal(5, _tts.Calls.Count);
+        queue.Stop();
+    }
+
+    [Fact]
+    public async Task Pause_requested_as_a_sentence_starts_is_applied_to_the_output()
+    {
+        _output.Manual = true;
+        var queue = Create();
+        queue.SentenceStarted += id =>
+        {
+            if (id == 0) queue.Pause();
+        };
+        queue.Load(Make(2));
+        await TestUtil.WaitUntil(() => _output.Pending);
+
+        // The pause arrived before the clip existed; it must be re-applied once the clip is playing.
+        await TestUtil.WaitUntil(() => _output.PausedWhilePending);
+        Assert.Equal(ReadingState.Paused, queue.State);
+
+        queue.Play();
+        Assert.True(_output.ResumeCalls >= 1);
+        _output.Release();
+        await TestUtil.WaitUntil(() => _started.Contains(1));
+        Assert.Equal(new[] { 0, 1 }, _started);
+        queue.Stop();
+    }
+
+    [Fact]
+    public async Task Throwing_event_handler_does_not_stop_playback()
+    {
+        var queue = Create();
+        queue.SentenceStarted += id =>
+        {
+            if (id == 0) throw new InvalidOperationException("handler failed");
+        };
+        var finished = NextFinished(queue);
+        queue.Load(Make(3));
+        await finished;
+
+        Assert.Equal(new[] { 0, 1, 2 }, _started);
+        Assert.Equal(3, _output.Played.Count);
+    }
 }

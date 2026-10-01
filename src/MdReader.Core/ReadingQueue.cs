@@ -153,7 +153,24 @@ public sealed class ReadingQueue
         RaiseState();
     }
 
-    private void RaiseState() => StateChanged?.Invoke(State);
+    private void RaiseState()
+    {
+        var state = State;
+        Raise(() => StateChanged?.Invoke(state));
+    }
+
+    /// <summary>Raises an event so that a throwing subscriber is logged instead of killing the caller.</summary>
+    private static void Raise(Action raise)
+    {
+        try
+        {
+            raise();
+        }
+        catch (Exception ex)
+        {
+            FileLog.Write($"Event handler failed: {ex}");
+        }
+    }
 
     private void ResetLocked()
     {
@@ -182,6 +199,7 @@ public sealed class ReadingQueue
     private void StartLocked(int index)
     {
         CancelRunLocked();
+        DropStaleClipsLocked(index);
         _runCts = new CancellationTokenSource();
         var ct = _runCts.Token;
         _index = index;
@@ -192,6 +210,29 @@ public sealed class ReadingQueue
             try { await previous; } catch { /* the previous run reports its own errors */ }
             await RunAsync(index, ct);
         });
+    }
+
+    /// <summary>
+    /// After a move, abandons look-ahead work for the old position so the target sentence
+    /// does not wait behind it in the engine and the clips do not stay cached forever.
+    /// </summary>
+    private void DropStaleClipsLocked(int index)
+    {
+        var window = new HashSet<int>();
+        for (var k = index; k <= index + LookAhead && k < _sentences.Count; k++)
+            window.Add(_sentences[k].Id);
+        if (_clips.Keys.All(window.Contains)) return;
+
+        // All syntheses share one token, so the pending ones inside the window are restarted too.
+        foreach (var id in _clips.Keys.ToList())
+        {
+            if (!window.Contains(id) || !_clips[id].IsCompletedSuccessfully) _clips.Remove(id);
+        }
+        // The run is already cancelled (CancelRunLocked), so cancelling under the lock cannot
+        // resume it; swap first so nothing can pick up the cancelled token.
+        var stale = _synthCts;
+        _synthCts = new CancellationTokenSource();
+        stale.Cancel();
     }
 
     private void EnsureClipLocked(Sentence sentence)
@@ -246,8 +287,8 @@ public sealed class ReadingQueue
 
             if (sentence is null || clipTask is null)
             {
-                StateChanged?.Invoke(ReadingState.Idle);
-                Finished?.Invoke();
+                Raise(() => StateChanged?.Invoke(ReadingState.Idle));
+                Raise(() => Finished?.Invoke());
                 return;
             }
 
@@ -270,7 +311,8 @@ public sealed class ReadingQueue
             catch (Exception ex)
             {
                 lock (_gate) _clips.Remove(sentence.Id);
-                SentenceFailed?.Invoke(sentence.Id, ex);
+                var failedId = sentence.Id;
+                Raise(() => SentenceFailed?.Invoke(failedId, ex));
                 i++;
                 continue;
             }
@@ -279,8 +321,13 @@ public sealed class ReadingQueue
             {
                 await WaitWhilePausedAsync(ct);
                 ct.ThrowIfCancellationRequested();
-                SentenceStarted?.Invoke(sentence.Id);
-                await _output.PlayAsync(clip, ct);
+                var startedId = sentence.Id;
+                Raise(() => SentenceStarted?.Invoke(startedId));
+                var playing = _output.PlayAsync(clip, ct);
+                // Pause() may have run after the wait above but before the output had anything
+                // to pause; apply it now that playback has started.
+                lock (_gate) { if (_pause is not null) _output.Pause(); }
+                await playing;
                 if (sentence.PauseAfterMs > 0) await _delay(sentence.PauseAfterMs, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -289,6 +336,8 @@ public sealed class ReadingQueue
             }
             catch (Exception ex)
             {
+                // A failure caused by cancelling this run is not an audio problem.
+                if (ct.IsCancellationRequested) return;
                 // Audio output problem: pause on this sentence; Play() retries it.
                 var paused = false;
                 lock (_gate)
@@ -300,8 +349,8 @@ public sealed class ReadingQueue
                         paused = true;
                     }
                 }
-                if (paused) StateChanged?.Invoke(ReadingState.Paused);
-                PlaybackFailed?.Invoke(ex);
+                if (paused) Raise(() => StateChanged?.Invoke(ReadingState.Paused));
+                Raise(() => PlaybackFailed?.Invoke(ex));
                 continue;
             }
 
