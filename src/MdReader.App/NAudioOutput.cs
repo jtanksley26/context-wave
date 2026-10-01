@@ -12,8 +12,10 @@ public sealed class NAudioOutput : IAudioOutput, IDisposable
 
     public async Task PlayAsync(AudioClip clip, CancellationToken ct)
     {
-        var bytes = new byte[clip.Samples.Length * sizeof(float)];
-        Buffer.BlockCopy(clip.Samples, 0, bytes, 0, bytes.Length);
+        // WasapiOut stops without draining, which can clip the end; pad with 120 ms of silence.
+        var padding = clip.SampleRate * 120 / 1000;
+        var bytes = new byte[(clip.Samples.Length + padding) * sizeof(float)];
+        Buffer.BlockCopy(clip.Samples, 0, bytes, 0, clip.Samples.Length * sizeof(float));
         using var stream = new RawSourceWaveStream(
             new MemoryStream(bytes), WaveFormat.CreateIeeeFloatWaveFormat(clip.SampleRate, 1));
         using var device = new WasapiOut(AudioClientShareMode.Shared, 50);
@@ -32,6 +34,8 @@ public sealed class NAudioOutput : IAudioOutput, IDisposable
             using var registration = ct.Register(device.Stop);
             ct.ThrowIfCancellationRequested();
             device.Play();
+            // Stop() is a no-op before Play(), so a cancel that landed in between was lost.
+            if (ct.IsCancellationRequested) device.Stop();
             await done.Task;
             ct.ThrowIfCancellationRequested();
         }

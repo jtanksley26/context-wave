@@ -11,6 +11,11 @@ public partial class App : Application
 
     protected override async void OnStartup(StartupEventArgs e)
     {
+        DispatcherUnhandledException += (_, a) =>
+        {
+            FileLog.Write($"Unhandled error: {a.Exception}");
+            a.Handled = true;
+        };
         base.OnStartup(e);
         var file = e.Args.FirstOrDefault();
 

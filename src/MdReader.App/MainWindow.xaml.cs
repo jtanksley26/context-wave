@@ -53,8 +53,10 @@ public partial class MainWindow : Window
             _view.Highlight(id);
             UpdatePosition();
         });
-        _queue.StateChanged += state => Dispatcher.InvokeAsync(() =>
+        _queue.StateChanged += _ => Dispatcher.InvokeAsync(() =>
         {
+            // Notifications can arrive out of order; show the queue's current state.
+            var state = _queue.State;
             PlayButton.Content = state == ReadingState.Playing ? "Pause" : "Play";
             if (state == ReadingState.Playing) StatusText.Text = "";
             UpdatePosition();
@@ -120,6 +122,18 @@ public partial class MainWindow : Window
         }
     }
 
+    private void SaveSettings()
+    {
+        try
+        {
+            _settings.Save(AppPaths.SettingsFile);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            FileLog.Write($"Settings could not be saved: {ex.Message}");
+        }
+    }
+
     private void UpdateTitle() => Title = _session.Source switch
     {
         "" => "MD Reader",
@@ -172,7 +186,7 @@ public partial class MainWindow : Window
     private void OnAnnounceClick(object sender, RoutedEventArgs e)
     {
         _settings.AnnounceCodeBlocks = AnnounceCodeItem.IsChecked;
-        _settings.Save(AppPaths.SettingsFile);
+        SaveSettings();
     }
 
     private void OnPlayClick(object sender, RoutedEventArgs e)
@@ -197,7 +211,7 @@ public partial class MainWindow : Window
         if (!_ready) return;
         _settings.Speed = (float)Math.Round(e.NewValue, 1);
         SpeedText.Text = $"{_settings.Speed:0.0}x";
-        _settings.Save(AppPaths.SettingsFile);
+        SaveSettings();
         _queue.InvalidateCache();
     }
 
@@ -206,8 +220,10 @@ public partial class MainWindow : Window
         if (!_ready || VoiceBox.SelectedItem is not VoiceOption voice) return;
         _settings.ModelId = voice.ModelId;
         _settings.SpeakerId = voice.SpeakerId;
-        _settings.Save(AppPaths.SettingsFile);
+        SaveSettings();
         _queue.InvalidateCache();
+        // Without the voice every sentence would fail and the queue would race to the end.
+        if (!VoiceReady()) _queue.Pause();
         UpdateBanner();
     }
 
