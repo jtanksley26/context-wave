@@ -13,7 +13,7 @@ public static class SentenceSplitter
 
     private static readonly HashSet<string> Abbreviations = new(StringComparer.OrdinalIgnoreCase)
     {
-        "e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "no", "fig", "inc", "ltd",
+        "e.g", "i.e", "etc", "vs", "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "fig", "inc", "ltd",
     };
 
     public static IReadOnlyList<TextRange> Split(string text)

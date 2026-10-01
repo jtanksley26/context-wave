@@ -38,4 +38,8 @@ public class SentenceSplitterTests
     [Fact]
     public void Whitespace_only_yields_nothing() =>
         Assert.Empty(Texts("   "));
+
+    [Fact]
+    public void Splits_after_the_word_no() =>
+        Assert.Equal(new[] { "The answer is no.", "The end." }, Texts("The answer is no. The end."));
 }
