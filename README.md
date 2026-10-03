@@ -30,6 +30,12 @@ dotnet test tests/MdReader.Tests -p:MdReaderOut=../../out-dev/ --filter "Categor
 The first time you pick a voice, the window offers to download it (Kokoro is about
 320 MB, Piper about 67 MB). Voices, settings and logs live in `%LOCALAPPDATA%\MdReader`.
 
+## Appearance
+
+**Settings > Theme** offers System (follows the Windows light/dark setting), Light, Dark, Dim,
+Sepia and High contrast. **Settings > Highlight colour** sets the colour used for the sentence
+being read and for the diff lines being talked about. Both apply at once and are remembered.
+
 ## Connect Claude
 
 ```bash
