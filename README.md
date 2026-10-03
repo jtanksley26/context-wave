@@ -32,12 +32,20 @@ The first time you pick a voice, the window offers to download it (Kokoro is abo
 
 ## Appearance
 
-**Settings > Theme** offers System (follows the Windows light/dark setting), Light, Dark, Dim,
-Sepia and High contrast. **Settings > Highlight colour** sets the colour used for the sentence
-being read and for the diff lines being talked about. Both apply at once and are remembered.
+Everything about how the window looks is under **View**:
 
-**Settings > Visualiser** shows a panel above the text that moves with the voice: Orb, Ring
-spectrum, Bars, Waveform or Particle swarm. Off hides it and stops the animation.
+- **Text size** (80% to 200%), **Font**, **Column width** and **Line spacing** for the reading
+  text. Ctrl with plus, minus or 0, and Ctrl with the mouse wheel, also change the size. The Font
+  menu lists Verdana, Georgia, Sitka Text, Atkinson Hyperlegible, OpenDyslexic and Lexend when
+  they are installed.
+- **Theme**: System (follows the Windows light/dark setting), Light, Dark, Dim, Sepia and High
+  contrast.
+- **Highlight colour**: the colour used for the sentence being read and for the diff lines
+  being talked about.
+- **Visualiser**: a panel above the text that moves with the voice (Orb, Ring spectrum, Bars,
+  Waveform or Particle swarm). Off hides it and stops the animation.
+
+Every choice applies at once and is remembered.
 
 ## Connect Claude
 
