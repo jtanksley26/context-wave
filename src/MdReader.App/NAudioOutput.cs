@@ -1,14 +1,23 @@
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Runtime.InteropServices;
 using MdReader.Core;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
 namespace MdReader.App;
 
-public sealed class NAudioOutput : IAudioOutput, IDisposable
+public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
 {
     private readonly object _lock = new();
     private WasapiOut? _current;
+    private AudioClip? _clip;
+
+    /// <summary>
+    /// Added to the reported position, to line the visualiser up with what is heard. Positive
+    /// shows the sound earlier, negative later.
+    /// </summary>
+    private const int LatencyOffsetMs = 0;
 
     public async Task PlayAsync(AudioClip clip, CancellationToken ct)
     {
@@ -28,7 +37,11 @@ public sealed class NAudioOutput : IAudioOutput, IDisposable
         };
         device.Init(stream);
 
-        lock (_lock) _current = device;
+        lock (_lock)
+        {
+            _current = device;
+            _clip = clip;
+        }
         try
         {
             using var registration = ct.Register(device.Stop);
@@ -41,7 +54,35 @@ public sealed class NAudioOutput : IAudioOutput, IDisposable
         }
         finally
         {
-            lock (_lock) _current = null;
+            lock (_lock)
+            {
+                _current = null;
+                _clip = null;
+            }
+        }
+    }
+
+    public bool TryGetPlayback([NotNullWhen(true)] out AudioClip? clip, out int samplePosition)
+    {
+        clip = null;
+        samplePosition = 0;
+        lock (_lock)
+        {
+            if (_clip is null || _current is not { PlaybackState: PlaybackState.Playing } device) return false;
+            try
+            {
+                // GetPosition counts bytes in the device's own format, not the clip's.
+                var played = AudioAnalyzer.SamplePosition(
+                    device.GetPosition(), device.OutputWaveFormat.AverageBytesPerSecond, _clip.SampleRate);
+                clip = _clip;
+                samplePosition = played + _clip.SampleRate * LatencyOffsetMs / 1000;
+                return true;
+            }
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or ObjectDisposedException)
+            {
+                // The device went away between the state check and the read.
+                return false;
+            }
         }
     }
 
