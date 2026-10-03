@@ -40,7 +40,8 @@ public partial class MainWindow : Window
         _initialFile = initialFile;
         _tts = new SherpaTtsEngine(_models);
         _queue = new ReadingQueue(_tts, _output, _settings.ToVoice);
-        _session = new ReaderSession(_queue, () => _settings.AnnounceCodeBlocks, VoiceReady);
+        _session = new ReaderSession(
+            _queue, () => _settings.AnnounceCodeBlocks, VoiceReady, () => _settings.Replies);
         _view = new DocumentView(WebView);
         _pipe = new PipeServer(
             PipeProtocol.DefaultPipeName,
@@ -106,6 +107,7 @@ public partial class MainWindow : Window
         };
         BuildVisualizerMenu();
         ApplyVisualizer();
+        BuildRepliesMenu();
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         Loaded += OnLoaded;
@@ -185,6 +187,7 @@ public partial class MainWindow : Window
         {
             "" => "MD Reader",
             "stream" => "MD Reader - from Claude",
+            ReaderSession.ReplySource => "Claude's reply - MD Reader",
             var path => $"{Path.GetFileName(path)} - MD Reader",
         };
 
@@ -297,6 +300,31 @@ public partial class MainWindow : Window
             swatch.Background = ThemeApplier.Brush(shade.HighlightFill);
             swatch.BorderBrush = ThemeApplier.Brush(shade.HighlightBar);
         }
+    }
+
+    private void BuildRepliesMenu()
+    {
+        foreach (var (id, name) in ReplyMode.Choices)
+        {
+            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
+            item.Click += OnRepliesClick;
+            RepliesMenu.Items.Add(item);
+        }
+        TickReplies();
+    }
+
+    /// <summary>Clicking a checkable item toggles it first, so set every tick from the setting.</summary>
+    private void TickReplies()
+    {
+        var mode = ReplyMode.Normalize(_settings.Replies);
+        foreach (MenuItem item in RepliesMenu.Items) item.IsChecked = (string)item.Tag == mode;
+    }
+
+    private void OnRepliesClick(object sender, RoutedEventArgs e)
+    {
+        _settings.Replies = (string)((MenuItem)sender).Tag;
+        SaveSettings();
+        TickReplies();
     }
 
     private void BuildVisualizerMenu()

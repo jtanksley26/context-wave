@@ -18,6 +18,8 @@
                 <MenuItem x:Name="ThemeMenu" Header="_Theme" />
                 <MenuItem x:Name="HighlightMenu" Header="_Highlight colour" />
                 <MenuItem x:Name="VisualizerMenu" Header="_Visualiser" />
+                <Separator />
+                <MenuItem x:Name="RepliesMenu" Header="Claude's _replies" />
             </MenuItem>
         </Menu>
 
