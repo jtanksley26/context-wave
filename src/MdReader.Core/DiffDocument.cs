@@ -41,7 +41,7 @@ public sealed partial class DiffDocument
     [GeneratedRegex(@"^@@ -(\d{1,9})(?:,(\d{1,9}))? \+(\d{1,9})(?:,(\d{1,9}))? @@")]
     private static partial Regex HunkHeader();
 
-    [GeneratedRegex(@"^(.*):(\d{1,9})(?:-(\d{1,9}))?$")]
+    [GeneratedRegex(@"^(.*?)\s*:\s*(\d{1,9})(?:\s*-\s*(\d{1,9}))?$")]
     private static partial Regex FocusRange();
 
     private DiffDocument(IReadOnlyList<DiffFile> files) => Files = files;
@@ -55,7 +55,8 @@ public sealed partial class DiffDocument
 
     /// <summary>
     /// Resolves "path", "path:line" or "path:start-end" (new-file line numbers). Returns null and sets
-    /// <paramref name="problem"/> when the path matches no file or more than one.
+    /// <paramref name="problem"/> when the path matches no file or more than one. A range that touches no
+    /// line shown in the diff resolves to the whole file.
     /// </summary>
     public DiffAnchor? Resolve(string focus, out string? problem)
     {
@@ -106,7 +107,7 @@ public sealed partial class DiffDocument
 
     private List<DiffFile> FindFiles(string path)
     {
-        var query = path.Trim().Replace('\\', '/');
+        var query = path.Replace('\\', '/');
         if (query.StartsWith("./", StringComparison.Ordinal)) query = query[2..];
         var found = MatchFiles(query);
         if (found.Count == 0
@@ -121,7 +122,18 @@ public sealed partial class DiffDocument
         var exact = Files.Where(f => Named(f, p => p.Equals(query, StringComparison.OrdinalIgnoreCase))).ToList();
         if (exact.Count > 0) return exact;
         var tail = "/" + query;
-        return Files.Where(f => Named(f, p => p.EndsWith(tail, StringComparison.OrdinalIgnoreCase))).ToList();
+        var ending = Files.Where(f => Named(f, p => p.EndsWith(tail, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (ending.Count > 0) return ending;
+
+        // The query may carry a longer path than the diff does ("C:/repo/src/Foo.cs" for "src/Foo.cs").
+        var inside = Files.Where(f => Named(f, p => query.EndsWith("/" + p, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (inside.Count <= 1) return inside;
+        var longest = inside.Max(MatchedLength);
+        return inside.Where(f => MatchedLength(f) == longest).ToList();
+
+        int MatchedLength(DiffFile f) => Math.Max(
+            query.EndsWith("/" + f.NewPath, StringComparison.OrdinalIgnoreCase) ? f.NewPath.Length : 0,
+            query.EndsWith("/" + f.OldPath, StringComparison.OrdinalIgnoreCase) ? f.OldPath.Length : 0);
     }
 
     private static bool Named(DiffFile file, Func<string, bool> test) => test(file.NewPath) || test(file.OldPath);

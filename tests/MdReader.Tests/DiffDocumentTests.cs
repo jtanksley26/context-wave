@@ -324,6 +324,53 @@ public class DiffDocumentTests
         Assert.Equal(expectedFile, Resolve(focus, out _)!.FileIndex);
     }
 
+    [Theory]
+    [InlineData(@"C:\repo\src\Foo.cs", 0)]
+    [InlineData("C:/repo/src/Foo.cs", 0)]
+    [InlineData("/src/Foo.cs", 0)]
+    [InlineData("repo/src/Foo.cs", 0)]
+    [InlineData(@"D:\x\tests\Foo.cs", 1)]
+    public void Resolve_accepts_a_longer_path_than_the_diff_uses(string focus, int expectedFile)
+    {
+        Assert.Equal(expectedFile, Resolve(focus, out _)!.FileIndex);
+    }
+
+    [Fact]
+    public void Resolve_a_longer_path_with_a_line_gives_the_same_anchor()
+    {
+        Assert.Equal(Resolve("src/Foo.cs:3", out _), Resolve("C:/repo/src/Foo.cs:3", out _));
+    }
+
+    [Fact]
+    public void Resolve_a_longer_path_prefers_the_longest_matching_file()
+    {
+        var diff = string.Join("\n",
+            "--- a/Foo.cs",
+            "+++ b/Foo.cs",
+            "@@ -1 +1 @@",
+            "-a",
+            "+b",
+            "--- a/src/Foo.cs",
+            "+++ b/src/Foo.cs",
+            "@@ -1 +1 @@",
+            "-c",
+            "+d");
+
+        var anchor = DiffDocument.Parse(diff).Resolve("C:/repo/src/Foo.cs", out var problem);
+        Assert.Equal(1, anchor!.FileIndex);
+        Assert.Null(problem);
+    }
+
+    [Theory]
+    [InlineData("src/Foo.cs: 3", 4, 4, "Foo.cs:3")]
+    [InlineData("src/Foo.cs :3", 4, 4, "Foo.cs:3")]
+    [InlineData("src/Foo.cs:2 - 4", 2, 5, "Foo.cs:2-4")]
+    [InlineData("src/Foo.cs : 2 -4", 2, 5, "Foo.cs:2-4")]
+    public void Resolve_tolerates_spaces_around_the_colon_and_dash(string focus, int first, int last, string label)
+    {
+        Assert.Equal(new DiffAnchor(0, first, last, label), Resolve(focus, out _));
+    }
+
     [Fact]
     public void Resolve_reports_an_ambiguous_name_with_its_candidates()
     {
