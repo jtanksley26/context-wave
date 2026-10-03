@@ -1,6 +1,11 @@
+using System.Net;
+
 namespace MdReader.Core;
 
 public sealed class ReaderException(string message) : Exception(message);
+
+/// <param name="FocusProblem">Why the focus could not be linked to the diff, or null.</param>
+public sealed record SpeakResult(int Count, string? FocusProblem);
 
 public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlocks, Func<bool> voiceReady)
 {
@@ -42,8 +47,10 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
                     return PipeResponse.Success($"Reading {Path.GetFileName(Source)} ({queue.Count} sentences).");
                 case "speak":
                     RequireVoice();
-                    var count = Speak(request.Text ?? "", request.Mode ?? "append");
-                    return PipeResponse.Success($"Queued {count} sentences.");
+                    var spoken = Speak(request.Text ?? "", request.Mode ?? "append", request.Focus);
+                    var queued = $"Queued {spoken.Count} sentences.";
+                    return PipeResponse.Success(
+                        spoken.FocusProblem is null ? queued : $"{queued} {spoken.FocusProblem}");
                 case "show_diff":
                     var files = ShowDiff(request.Diff ?? "", request.Title);
                     return PipeResponse.Success($"Showing diff: {files} {(files == 1 ? "file" : "files")}.");
@@ -99,18 +106,47 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         Replace(text, path);
     }
 
-    public int Speak(string text, string mode)
+    public SpeakResult Speak(string text, string mode, string? focus = null)
     {
         if (mode is not ("append" or "replace"))
             throw new ReaderException($"Unknown mode '{mode}'. Use 'append' or 'replace'.");
         if (string.IsNullOrWhiteSpace(text)) throw new ReaderException("The text is empty.");
 
-        if (mode == "replace" || Source == "") return Replace(text, "stream");
+        DiffAnchor? anchor = null;
+        string? problem = null;
+        if (!string.IsNullOrWhiteSpace(focus))
+        {
+            if (_diff is null) problem = $"Focus '{focus}' was ignored because no diff is loaded.";
+            else anchor = _diff.Resolve(focus, out problem);
+        }
+
+        var replace = mode == "replace" || Source == "";
+        if (replace)
+        {
+            _document = new MarkdownDocument(announceCodeBlocks());
+            _anchors.Clear();
+        }
 
         var result = _document.Append(text);
-        DocumentAppended?.Invoke(result.Html);
-        queue.Append(result.Sentences, voiceReady());
-        return result.Sentences.Count;
+        var html = result.Html;
+        if (anchor is not null)
+        {
+            foreach (var sentence in result.Sentences) _anchors[sentence.Id] = anchor;
+            html = $"<div class=\"focus-label\">{WebUtility.HtmlEncode(anchor.Label)}</div>{html}";
+        }
+
+        if (replace)
+        {
+            Source = "stream";
+            DocumentReplaced?.Invoke(html);
+            queue.Load(result.Sentences, voiceReady());
+        }
+        else
+        {
+            DocumentAppended?.Invoke(html);
+            queue.Append(result.Sentences, voiceReady());
+        }
+        return new SpeakResult(result.Sentences.Count, problem);
     }
 
     /// <summary>Starts a walkthrough: stops reading, clears the document and shows the diff.</summary>
@@ -132,6 +168,29 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         DocumentReplaced?.Invoke("");
         DiffReplaced?.Invoke(parsed.Html, DiffTitle);
         return parsed.Files.Count;
+    }
+
+    /// <summary>The place in the diff that sentence was spoken about, or null.</summary>
+    public DiffAnchor? AnchorFor(int sentenceId) => _anchors.GetValueOrDefault(sentenceId);
+
+    /// <summary>
+    /// The first sentence to jump to for a click in the diff. With a line: a sentence whose range covers
+    /// it, otherwise one linked to the whole file. Without a line (the file header): any sentence linked
+    /// to that file.
+    /// </summary>
+    public int? SentenceForDiff(int fileIndex, int? lineIndex)
+    {
+        int? inRange = null, wholeFile = null, any = null;
+        foreach (var (id, anchor) in _anchors)
+        {
+            if (anchor.FileIndex != fileIndex) continue;
+            any = Lower(any, id);
+            if (anchor.FirstLine is null) wholeFile = Lower(wholeFile, id);
+            else if (lineIndex >= anchor.FirstLine && lineIndex <= anchor.LastLine) inRange = Lower(inRange, id);
+        }
+        return lineIndex is null ? any : inRange ?? wholeFile;
+
+        static int Lower(int? current, int id) => current is { } value && value < id ? value : id;
     }
 
     public void Stop()

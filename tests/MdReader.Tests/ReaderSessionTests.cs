@@ -38,8 +38,8 @@ public sealed class ReaderSessionTests : IDisposable
 
     private PipeResponse ReadFile(string path) => _session.Handle(new PipeRequest { Op = "read_file", Path = path });
 
-    private PipeResponse Speak(string text, string? mode = null) =>
-        _session.Handle(new PipeRequest { Op = "speak", Text = text, Mode = mode });
+    private PipeResponse Speak(string text, string? mode = null, string? focus = null) =>
+        _session.Handle(new PipeRequest { Op = "speak", Text = text, Mode = mode, Focus = focus });
 
     private PipeResponse ShowDiff(string diff, string? title = null) =>
         _session.Handle(new PipeRequest { Op = "show_diff", Diff = diff, Title = title });
@@ -338,5 +338,97 @@ public sealed class ReaderSessionTests : IDisposable
 
         Assert.Single(_diffs);
         Assert.Equal(1, Status().DiffFiles);
+    }
+
+    [Fact]
+    public void Speak_with_focus_links_every_sentence_in_the_chunk_and_labels_it()
+    {
+        ShowDiff(SampleDiff.Foo);
+        var response = Speak("One. Two.", focus: "Foo.cs:2-4");
+        Speak("Three.");
+
+        Assert.Equal("Queued 2 sentences.", response.Result!.Message);
+        var expected = new DiffAnchor(0, 2, 5, "Foo.cs:2-4");
+        Assert.Equal(expected, _session.AnchorFor(0));
+        Assert.Equal(expected, _session.AnchorFor(1));
+        Assert.Null(_session.AnchorFor(2));
+        Assert.StartsWith("<div class=\"focus-label\">Foo.cs:2-4</div>", _appended[0]);
+        Assert.DoesNotContain("focus-label", _appended[1]);
+    }
+
+    [Fact]
+    public void Speak_with_a_focus_that_is_not_in_the_diff_still_reads_and_says_so()
+    {
+        ShowDiff(SampleDiff.Foo);
+        var response = Speak("One.", focus: "Bar.cs:1");
+
+        Assert.True(response.Ok);
+        Assert.Equal("Queued 1 sentences. Focus 'Bar.cs:1' was not found in the diff.", response.Result!.Message);
+        Assert.Equal(1, _queue.Count);
+        Assert.Null(_session.AnchorFor(0));
+        Assert.DoesNotContain("focus-label", _appended[0]);
+    }
+
+    [Fact]
+    public void Speak_with_focus_but_no_diff_still_reads_and_says_so()
+    {
+        var response = Speak("One.", focus: "Foo.cs:1");
+
+        Assert.True(response.Ok);
+        Assert.Contains("no diff is loaded", response.Result!.Message);
+        Assert.Equal(1, _queue.Count);
+    }
+
+    [Fact]
+    public void Speak_replace_keeps_the_diff_and_drops_the_links()
+    {
+        ShowDiff(SampleDiff.Foo);
+        Speak("One.", focus: "Foo.cs:2");
+        Speak("Again.", "replace", "Foo.cs:3");
+
+        Assert.Single(_diffs);
+        Assert.Equal(1, Status().DiffFiles);
+        Assert.Equal(1, _queue.Count);
+        Assert.Equal("Foo.cs:3", _session.AnchorFor(0)!.Label);
+        Assert.StartsWith("<div class=\"focus-label\">Foo.cs:3</div>", _replaced.Last());
+    }
+
+    [Fact]
+    public void A_new_diff_drops_the_links()
+    {
+        ShowDiff(SampleDiff.Foo);
+        Speak("One.", focus: "Foo.cs:2");
+        ShowDiff(SampleDiff.Foo);
+
+        Assert.Null(_session.AnchorFor(0));
+        Assert.Null(_session.SentenceForDiff(0, null));
+    }
+
+    [Fact]
+    public void SentenceForDiff_prefers_a_line_range_over_a_whole_file_link()
+    {
+        ShowDiff(SampleDiff.Many);
+        Speak("Whole file.", focus: "src/Foo.cs");      // sentence 0, whole file
+        Speak("The change.", focus: "src/Foo.cs:2-4");  // sentence 1, rows 2-5
+        Speak("Once more.", focus: "src/Foo.cs:2");     // sentence 2, rows 2-3
+
+        Assert.Equal(1, _session.SentenceForDiff(0, 3));
+        Assert.Equal(1, _session.SentenceForDiff(0, 5));
+        Assert.Equal(0, _session.SentenceForDiff(0, 9));
+        Assert.Equal(0, _session.SentenceForDiff(0, null));
+        Assert.Null(_session.SentenceForDiff(1, 12));
+        Assert.Null(_session.SentenceForDiff(1, null));
+    }
+
+    [Fact]
+    public void SentenceForDiff_ignores_lines_nobody_talked_about()
+    {
+        ShowDiff(SampleDiff.Foo);
+        Speak("Intro.");
+        Speak("The change.", focus: "Foo.cs:2-4");      // sentence 1, rows 2-5
+
+        Assert.Null(_session.SentenceForDiff(0, 9));
+        Assert.Equal(1, _session.SentenceForDiff(0, 4));
+        Assert.Equal(1, _session.SentenceForDiff(0, null));
     }
 }
