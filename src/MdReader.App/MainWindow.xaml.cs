@@ -92,6 +92,10 @@ public partial class MainWindow : Window
         };
         _view.FileDropped += OpenPath;
 
+        BuildThemeMenus();
+        ApplyTheme();
+        SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
+
         Loaded += OnLoaded;
         Closed += OnClosed;
     }
@@ -128,6 +132,7 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _pipe.Dispose();
         _queue.Stop();
         _output.Dispose();
@@ -230,6 +235,77 @@ public partial class MainWindow : Window
     private void OnDrop(object sender, DragEventArgs e)
     {
         if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files) OpenPath(files[0]);
+    }
+
+    private void BuildThemeMenus()
+    {
+        foreach (var (id, name) in ThemeCatalog.ThemeChoices)
+        {
+            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
+            item.Click += OnThemeClick;
+            ThemeMenu.Items.Add(item);
+        }
+
+        foreach (var highlight in ThemeCatalog.Highlights)
+        {
+            var swatch = new Border
+            {
+                Width = 14,
+                Height = 14,
+                CornerRadius = new CornerRadius(3),
+                BorderThickness = new Thickness(1),
+            };
+            swatch.SetResourceReference(Border.BorderBrushProperty, "ControlBorderBrush");
+            var item = new MenuItem { Header = highlight.DisplayName, Tag = highlight.Id, IsCheckable = true, Icon = swatch };
+            item.Click += OnHighlightClick;
+            HighlightMenu.Items.Add(item);
+        }
+    }
+
+    /// <summary>Resolves the theme from the settings and Windows, and applies it everywhere.</summary>
+    private void ApplyTheme()
+    {
+        var systemIsDark = ThemeApplier.SystemIsDark();
+        var resolved = ThemeCatalog.Resolve(_settings.Theme, _settings.Highlight, systemIsDark);
+
+        ThemeApplier.ApplyBrushes(Application.Current.Resources, resolved);
+        ThemeApplier.SetTitleBar(this, resolved.IsDark);
+        _view.SetTheme(resolved);
+
+        // Clicking a checkable item toggles it first, so set every tick from the settings.
+        var themeId = ThemeCatalog.IsSystem(_settings.Theme) ? ThemeCatalog.SystemId : _settings.Theme;
+        foreach (MenuItem item in ThemeMenu.Items) item.IsChecked = (string)item.Tag == themeId;
+        foreach (MenuItem item in HighlightMenu.Items)
+        {
+            var id = (string)item.Tag;
+            item.IsChecked = id == resolved.Highlight.Id;
+            var shade = ThemeCatalog.Resolve(resolved.Theme.Id, id, systemIsDark);
+            ((Border)item.Icon).Background = ThemeApplier.Brush(shade.HighlightFill);
+        }
+    }
+
+    private void OnThemeClick(object sender, RoutedEventArgs e)
+    {
+        _settings.Theme = (string)((MenuItem)sender).Tag;
+        SaveSettings();
+        ApplyTheme();
+    }
+
+    private void OnHighlightClick(object sender, RoutedEventArgs e)
+    {
+        _settings.Highlight = (string)((MenuItem)sender).Tag;
+        SaveSettings();
+        ApplyTheme();
+    }
+
+    /// <summary>Windows raises this on its own thread when the light/dark setting changes.</summary>
+    private void OnUserPreferenceChanged(object sender, UserPreferenceChangedEventArgs e)
+    {
+        if (e.Category != UserPreferenceCategory.General) return;
+        Dispatcher.InvokeAsync(() =>
+        {
+            if (ThemeCatalog.IsSystem(_settings.Theme)) ApplyTheme();
+        });
     }
 
     private void OnAnnounceClick(object sender, RoutedEventArgs e)
