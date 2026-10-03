@@ -22,8 +22,12 @@ public sealed class DocumentView(WebView2 webView)
                   --line:#d0d7de; --code:#f6f8fa; --add:#e6ffec; --del:#ffebe9;
                   --focus:#9a6700; --focusbg:rgba(154,103,0,0.22); }
           html { height:100%; }
-          body { background:var(--bg); color:var(--fg); font:17px/1.65 "Segoe UI",sans-serif;
-                 max-width:760px; margin:0 auto; padding:24px 32px 40vh; }
+          /* Today's text settings; setText() replaces every one of these. */
+          :root { --size:17px; --font:"Segoe UI",sans-serif; --col:44.7em; --lh:1.65; }
+          body { background:var(--bg); color:var(--fg); font:var(--size)/var(--lh) var(--font);
+                 margin:0; padding:24px 32px 40vh; }
+          /* The column is capped on the document, not the body, so the visualiser can span the pane. */
+          #doc, #empty { max-width:var(--col); margin-left:auto; margin-right:auto; }
           [data-sid] { cursor:pointer; border-radius:3px; }
           .speaking { background:var(--hl); color:var(--hlfg); }
           pre { background:var(--code); padding:12px; overflow:auto; border-radius:6px; }
@@ -47,7 +51,7 @@ public sealed class DocumentView(WebView2 webView)
           #diff, #divider { display:none; }
           body.split { max-width:none; margin:0; padding:0; height:100%; display:flex; overflow:hidden; }
           body.split #diff { display:block; flex:0 0 var(--diffw, 55%); min-width:0; overflow:auto;
-                             font:13px/1.5 Consolas,monospace; }
+                             font:calc(var(--size) * 0.765)/1.5 Consolas,monospace; }
           body.split #divider { display:block; flex:0 0 6px; cursor:col-resize; background:var(--line); }
           body.split #text { flex:1 1 0; min-width:0; overflow:auto; padding:24px 32px 40vh; }
           body.split #empty { display:none; }
@@ -68,7 +72,7 @@ public sealed class DocumentView(WebView2 webView)
           .dl.hunk { background-color:var(--code); opacity:.75; }
           .focused { box-shadow:inset 4px 0 0 var(--focus);
                      background-image:linear-gradient(var(--focusbg), var(--focusbg)); }
-          .focus-label { font:12px Consolas,monospace; opacity:.7; margin:22px 0 -10px; }
+          .focus-label { font:calc(var(--size) * 0.7) Consolas,monospace; opacity:.7; margin:22px 0 -10px; }
         </style>
         </head>
         <body>
@@ -103,6 +107,12 @@ public sealed class DocumentView(WebView2 webView)
             const parts = document.querySelectorAll('[data-sid="' + id + '"]');
             parts.forEach(e => e.classList.add('speaking'));
             if (parts.length) parts[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+
+          // text.vars maps a variable name (without "--") to its value: size, font, col, lh.
+          function setText(text) {
+            const root = document.documentElement;
+            for (const name in text.vars) root.style.setProperty('--' + name, text.vars[name]);
           }
 
           // theme.vars maps a variable name (without "--") to its value.
@@ -141,6 +151,24 @@ public sealed class DocumentView(WebView2 webView)
             }
             if (target) target.scrollIntoView({ behavior: 'smooth', block: first === null ? 'start' : 'center' });
           }
+
+          // Ctrl with plus, minus or 0, and Ctrl with the wheel, change the text size setting.
+          document.addEventListener('keydown', e => {
+            if (!e.ctrlKey || e.altKey) return;
+            const step = e.key === '+' || e.key === '=' ? 'up' : e.key === '-' ? 'down' : e.key === '0' ? 'reset' : null;
+            if (!step) return;
+            e.preventDefault();
+            window.chrome.webview.postMessage('text:' + step);
+          });
+          let lastWheelStep = 0;
+          document.addEventListener('wheel', e => {
+            if (!e.ctrlKey) return;
+            e.preventDefault();
+            const now = performance.now();
+            if (now - lastWheelStep < 120) return;
+            lastWheelStep = now;
+            window.chrome.webview.postMessage('text:' + (e.deltaY < 0 ? 'up' : 'down'));
+          }, { passive: false });
 
           document.addEventListener('click', e => {
             if (e.target.closest('a')) return;
@@ -427,12 +455,16 @@ public sealed class DocumentView(WebView2 webView)
     private bool _loaded;
     private ResolvedTheme? _theme;
     private string _visualizer = VisualizerCatalog.OffId;
+    private ResolvedText? _text;
 
     public event Action<int>? SentenceClicked;
     public event Action<string>? FileDropped;
 
     /// <summary>A click in the diff: the file index, and the line index or null for the file header.</summary>
     public event Action<int, int?>? DiffClicked;
+
+    /// <summary>A size shortcut was used in the page: +1 larger, -1 smaller, 0 back to the default.</summary>
+    public event Action<int>? TextSizeRequested;
 
     public async Task InitializeAsync()
     {
@@ -442,6 +474,8 @@ public sealed class DocumentView(WebView2 webView)
         core.Settings.AreDefaultContextMenusEnabled = false;
         core.Settings.AreDevToolsEnabled = false;
         core.Settings.IsStatusBarEnabled = false;
+        // The text size setting replaces the browser's own zoom, which would scale the visualiser too.
+        core.Settings.IsZoomControlEnabled = false;
 
         core.WebMessageReceived += (_, e) => OnMessage(e.TryGetWebMessageAsString());
         core.NewWindowRequested += (_, e) =>
@@ -463,6 +497,7 @@ public sealed class DocumentView(WebView2 webView)
         core.NavigationStarting += OnNavigationStarting;
         _loaded = true;
         if (_theme is not null) SetTheme(_theme);
+        if (_text is not null) SetText(_text);
         SetVisualizer(_visualizer);
     }
 
@@ -481,6 +516,13 @@ public sealed class DocumentView(WebView2 webView)
         webView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(r, g, b);
         var payload = new { dark = theme.IsDark, vars = theme.PageVariables() };
         Run($"setTheme({JsonSerializer.Serialize(payload)})");
+    }
+
+    /// <summary>Applies the text size, font, column width and line spacing now, or once the page has loaded.</summary>
+    public void SetText(ResolvedText text)
+    {
+        _text = text;
+        Run($"setText({JsonSerializer.Serialize(new { vars = text.PageVariables() })})");
     }
 
     /// <summary>Shows the visualiser in this style, or hides it for "off". Applies once the page has loaded.</summary>
@@ -522,12 +564,28 @@ public sealed class DocumentView(WebView2 webView)
         if (_loaded) _ = webView.CoreWebView2.ExecuteScriptAsync(script);
     }
 
-    /// <summary>The page posts a sentence id, or "diff:{file}:{line}" with the line empty for a header.</summary>
+    /// <summary>
+    /// The page posts a sentence id, "diff:{file}:{line}" (line empty for a header), or
+    /// "text:up", "text:down" or "text:reset".
+    /// </summary>
     private void OnMessage(string message)
     {
         if (int.TryParse(message, out var id))
         {
             SentenceClicked?.Invoke(id);
+            return;
+        }
+
+        if (message.StartsWith("text:", StringComparison.Ordinal))
+        {
+            int? direction = message["text:".Length..] switch
+            {
+                "up" => 1,
+                "down" => -1,
+                "reset" => 0,
+                _ => null,
+            };
+            if (direction is { } step) TextSizeRequested?.Invoke(step);
             return;
         }
 
