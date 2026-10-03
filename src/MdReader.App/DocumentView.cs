@@ -16,17 +16,15 @@ public sealed class DocumentView(WebView2 webView)
         <meta http-equiv="Content-Security-Policy"
               content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
         <style>
-          :root { color-scheme: light dark; --bg:#ffffff; --fg:#1f2328; --hl:#fff3a3; --line:#d0d7de; --code:#f6f8fa;
-                  --add:#e6ffec; --del:#ffebe9; --focus:#bf8700; --focusbg:rgba(255,212,0,.22); }
-          @media (prefers-color-scheme: dark) {
-            :root { --bg:#1e1e1e; --fg:#e6e6e6; --hl:#5c4b00; --line:#444444; --code:#2a2a2a;
-                    --add:#12361f; --del:#4a1d1d; --focus:#e3b341; --focusbg:rgba(227,179,65,.2); }
-          }
+          /* The Light theme; setTheme() replaces every one of these. */
+          :root { color-scheme: light; --bg:#ffffff; --fg:#1f2328; --hl:#fff3a3; --hlfg:#1f2328;
+                  --line:#d0d7de; --code:#f6f8fa; --add:#e6ffec; --del:#ffebe9;
+                  --focus:#9a6700; --focusbg:rgba(154,103,0,0.22); }
           html { height:100%; }
           body { background:var(--bg); color:var(--fg); font:17px/1.65 "Segoe UI",sans-serif;
                  max-width:760px; margin:0 auto; padding:24px 32px 40vh; }
           [data-sid] { cursor:pointer; border-radius:3px; }
-          .speaking { background:var(--hl); }
+          .speaking { background:var(--hl); color:var(--hlfg); }
           pre { background:var(--code); padding:12px; overflow:auto; border-radius:6px; }
           code { font-family:Consolas,monospace; font-size:.92em; }
           pre code[data-sid] { display:block; }
@@ -97,6 +95,13 @@ public sealed class DocumentView(WebView2 webView)
             if (parts.length) parts[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
           }
 
+          // theme.vars maps a variable name (without "--") to its value.
+          function setTheme(theme) {
+            const root = document.documentElement;
+            for (const name in theme.vars) root.style.setProperty('--' + name, theme.vars[name]);
+            root.style.colorScheme = theme.dark ? 'dark' : 'light';
+          }
+
           function setDiff(html, title) {
             diffBody.innerHTML = html;
             diffTitle.textContent = title;
@@ -154,6 +159,7 @@ public sealed class DocumentView(WebView2 webView)
         """;
 
     private bool _loaded;
+    private ResolvedTheme? _theme;
 
     public event Action<int>? SentenceClicked;
     public event Action<string>? FileDropped;
@@ -189,6 +195,7 @@ public sealed class DocumentView(WebView2 webView)
 
         core.NavigationStarting += OnNavigationStarting;
         _loaded = true;
+        if (_theme is not null) SetTheme(_theme);
     }
 
     public void SetDocument(string html) => Run($"setDoc({JsonSerializer.Serialize(html)})");
@@ -196,6 +203,17 @@ public sealed class DocumentView(WebView2 webView)
     public void Append(string html) => Run($"appendDoc({JsonSerializer.Serialize(html)})");
 
     public void Highlight(int sentenceId) => Run($"highlight({sentenceId})");
+
+    /// <summary>Applies the theme to the page now, or as soon as the page has loaded.</summary>
+    public void SetTheme(ResolvedTheme theme)
+    {
+        _theme = theme;
+        // The WebView's own background shows before the page paints; match it to avoid a flash.
+        var (r, g, b) = ThemeCatalog.Rgb(theme.Theme.Background);
+        webView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(r, g, b);
+        var payload = new { dark = theme.IsDark, vars = theme.PageVariables() };
+        Run($"setTheme({JsonSerializer.Serialize(payload)})");
+    }
 
     /// <summary>Shows the diff pane with this HTML, or hides it when the HTML is empty.</summary>
     public void SetDiff(string html, string? title) =>
