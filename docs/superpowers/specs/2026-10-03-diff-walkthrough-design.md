@@ -178,6 +178,27 @@ All diff text is HTML-escaped. The page's content security policy is unchanged.
   highlight, click-to-jump from the diff, return to the single-column layout after
   `stop` or opening a file.
 
+## Amendments (2026-10-03, from implementation planning)
+
+- `DiffDocument.Resolve` is `DiffAnchor? Resolve(string focus, out string? problem)`. The
+  problem text is what the `speak` result reports when a focus does not resolve.
+- A resolved range also takes in removed lines that sit directly before its first line,
+  so a changed line is highlighted as its old and new text together.
+- Diff clicks are reported as a file index plus an optional line index:
+  `DocumentView.DiffClicked(int fileIndex, int? lineIndex)` and
+  `ReaderSession.SentenceForDiff(int fileIndex, int? lineIndex)` replace
+  `DiffLineClicked` and `SentenceForDiffLine`. The page posts `diff:{file}:{line}`, with
+  the line empty for a file header. A header click jumps to the first sentence linked
+  anywhere in that file, which also works for files with no lines (binary, pure rename).
+- The diff pane is refocused only when the spoken sentence's anchor differs from the
+  previous sentence's, so it does not undo manual scrolling within a chunk.
+- `ReaderSession.DiffTitle` exposes the title for the window caption.
+- A file with no hunks is kept when it came from a `diff --git` header (pure rename,
+  mode change, empty new file) and shown as a header only.
+- The App and Bridge output folder can be overridden with the `MdReaderOut` build
+  property, so the code can be built and tested while a Claude session holds the bridge
+  in `out/` open.
+
 ## Out of scope
 
 Syntax colouring; word-level change marks within a line; two-column diffs; collapsing
