@@ -10,6 +10,7 @@ public sealed class ReaderSessionTests : IDisposable
     private readonly ReaderSession _session;
     private readonly List<string> _replaced = [];
     private readonly List<string> _appended = [];
+    private readonly List<(string Html, string? Title)> _diffs = [];
     private bool _voiceReady = true;
 
     public ReaderSessionTests()
@@ -19,6 +20,7 @@ public sealed class ReaderSessionTests : IDisposable
         _session = new ReaderSession(_queue, () => true, () => _voiceReady);
         _session.DocumentReplaced += _replaced.Add;
         _session.DocumentAppended += _appended.Add;
+        _session.DiffReplaced += (html, title) => _diffs.Add((html, title));
     }
 
     public void Dispose()
@@ -38,6 +40,11 @@ public sealed class ReaderSessionTests : IDisposable
 
     private PipeResponse Speak(string text, string? mode = null) =>
         _session.Handle(new PipeRequest { Op = "speak", Text = text, Mode = mode });
+
+    private PipeResponse ShowDiff(string diff, string? title = null) =>
+        _session.Handle(new PipeRequest { Op = "show_diff", Diff = diff, Title = title });
+
+    private PipeResult Status() => _session.Handle(new PipeRequest { Op = "status" }).Result!;
 
     [Fact]
     public void ReadFile_loads_the_document_and_starts_reading()
@@ -206,5 +213,130 @@ public sealed class ReaderSessionTests : IDisposable
         Assert.True(_session.Handle(new PipeRequest { Op = "activate" }).Ok);
         Assert.True(activated);
         Assert.Contains("Unknown", _session.Handle(new PipeRequest { Op = "dance" }).Error);
+    }
+
+    [Fact]
+    public void ShowDiff_stops_reading_clears_the_document_and_shows_the_diff()
+    {
+        Speak("First.");
+        var response = ShowDiff(SampleDiff.Many, " PR 12 ");
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Equal("Showing diff: 5 files.", response.Result!.Message);
+        Assert.Equal(0, _queue.Count);
+        Assert.Equal(ReadingState.Idle, _queue.State);
+        Assert.Equal("stream", _session.Source);
+        Assert.Equal("", _replaced.Last());
+        Assert.Equal("PR 12", _session.DiffTitle);
+        var (html, title) = Assert.Single(_diffs);
+        Assert.Contains("data-line=\"0\"", html);
+        Assert.Equal("PR 12", title);
+    }
+
+    [Fact]
+    public void ShowDiff_reports_a_single_file_in_the_singular()
+    {
+        Assert.Equal("Showing diff: 1 file.", ShowDiff(SampleDiff.Foo).Result!.Message);
+        Assert.Null(_session.DiffTitle);
+    }
+
+    [Fact]
+    public void ShowDiff_does_not_need_the_voice()
+    {
+        _voiceReady = false;
+        Assert.True(ShowDiff(SampleDiff.Foo).Ok);
+    }
+
+    [Theory]
+    [InlineData("", "empty")]
+    [InlineData("   \n", "empty")]
+    [InlineData("hello there", "not a unified diff")]
+    public void ShowDiff_rejects_bad_input_and_leaves_the_reading_alone(string diff, string expected)
+    {
+        Speak("First.");
+        var response = ShowDiff(diff);
+
+        Assert.False(response.Ok);
+        Assert.Contains(expected, response.Error);
+        Assert.Equal(1, _queue.Count);
+        Assert.Equal(ReadingState.Playing, _queue.State);
+        Assert.Empty(_diffs);
+        Assert.Single(_replaced);
+    }
+
+    [Fact]
+    public void ShowDiff_rejects_a_diff_over_the_limit()
+    {
+        var response = ShowDiff(new string('x', ReaderSession.MaxDiffBytes + 1));
+        Assert.False(response.Ok);
+        Assert.Contains("too large", response.Error);
+    }
+
+    [Fact]
+    public void Speak_after_ShowDiff_appends_and_starts_reading()
+    {
+        ShowDiff(SampleDiff.Foo);
+        Assert.True(Speak("One.").Ok);
+
+        Assert.Equal(1, _queue.Count);
+        Assert.Equal(ReadingState.Playing, _queue.State);
+        Assert.Contains("data-sid=\"0\"", Assert.Single(_appended));
+    }
+
+    [Fact]
+    public void A_second_ShowDiff_replaces_the_first()
+    {
+        ShowDiff(SampleDiff.Many);
+        ShowDiff(SampleDiff.Foo);
+
+        Assert.Equal(2, _diffs.Count);
+        Assert.Equal(1, Status().DiffFiles);
+    }
+
+    [Fact]
+    public void Status_reports_the_number_of_files_in_the_diff()
+    {
+        Assert.Equal(0, Status().DiffFiles);
+        ShowDiff(SampleDiff.Many);
+        Assert.Equal(5, Status().DiffFiles);
+    }
+
+    [Fact]
+    public void Stop_unloads_the_diff()
+    {
+        ShowDiff(SampleDiff.Foo, "PR 12");
+        _session.Handle(new PipeRequest { Op = "stop" });
+
+        Assert.Equal(("", (string?)null), _diffs.Last());
+        Assert.Null(_session.DiffTitle);
+        Assert.Equal(0, Status().DiffFiles);
+    }
+
+    [Fact]
+    public void Stop_without_a_diff_does_not_raise_DiffReplaced()
+    {
+        Speak("First.");
+        _session.Handle(new PipeRequest { Op = "stop" });
+        Assert.Empty(_diffs);
+    }
+
+    [Fact]
+    public void Opening_a_file_unloads_the_diff()
+    {
+        ShowDiff(SampleDiff.Foo);
+        Assert.True(ReadFile(Write("a.md", "One.")).Ok);
+
+        Assert.Equal(("", (string?)null), _diffs.Last());
+        Assert.Equal(0, Status().DiffFiles);
+    }
+
+    [Fact]
+    public void A_failed_ReadFile_keeps_the_diff()
+    {
+        ShowDiff(SampleDiff.Foo);
+        ReadFile(Path.Combine(_dir, "missing.md"));
+
+        Assert.Single(_diffs);
+        Assert.Equal(1, Status().DiffFiles);
     }
 }

@@ -5,17 +5,29 @@ public sealed class ReaderException(string message) : Exception(message);
 public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlocks, Func<bool> voiceReady)
 {
     public const long MaxFileBytes = 5 * 1024 * 1024;
+    public const int MaxDiffBytes = 2 * 1024 * 1024;
 
     private static readonly HashSet<string> Extensions =
         new(StringComparer.OrdinalIgnoreCase) { ".md", ".markdown", ".txt" };
 
     private MarkdownDocument _document = new();
 
+    private DiffDocument? _diff;
+
+    // Sentence id -> the place in the diff its chunk was spoken about.
+    private readonly Dictionary<int, DiffAnchor> _anchors = [];
+
     /// <summary>"" when empty, "stream" for text sent by Claude, otherwise the file path.</summary>
     public string Source { get; private set; } = "";
 
+    /// <summary>The title given with the loaded diff, or null.</summary>
+    public string? DiffTitle { get; private set; }
+
     public event Action<string>? DocumentReplaced;
     public event Action<string>? DocumentAppended;
+
+    /// <summary>The diff HTML and title; "" and null when the diff is unloaded.</summary>
+    public event Action<string, string?>? DiffReplaced;
     public event Action? ActivateRequested;
 
     public PipeResponse Handle(PipeRequest request)
@@ -32,6 +44,9 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
                     RequireVoice();
                     var count = Speak(request.Text ?? "", request.Mode ?? "append");
                     return PipeResponse.Success($"Queued {count} sentences.");
+                case "show_diff":
+                    var files = ShowDiff(request.Diff ?? "", request.Title);
+                    return PipeResponse.Success($"Showing diff: {files} {(files == 1 ? "file" : "files")}.");
                 case "stop":
                     Stop();
                     return PipeResponse.Success("Stopped.");
@@ -80,6 +95,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
             throw new ReaderException($"Could not read the file: {ex.Message}");
         }
 
+        ClearDiff();
         Replace(text, path);
     }
 
@@ -97,11 +113,33 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         return result.Sentences.Count;
     }
 
+    /// <summary>Starts a walkthrough: stops reading, clears the document and shows the diff.</summary>
+    /// <returns>The number of files in the diff.</returns>
+    public int ShowDiff(string diff, string? title)
+    {
+        if (string.IsNullOrWhiteSpace(diff)) throw new ReaderException("The diff is empty.");
+        if (PipeProtocol.Utf8.GetByteCount(diff) > MaxDiffBytes)
+            throw new ReaderException("Diff is too large (limit 2 MB).");
+        // Parse before touching anything so a bad diff leaves the current reading alone.
+        var parsed = DiffDocument.Parse(diff);
+
+        queue.Stop();
+        _document = new MarkdownDocument(announceCodeBlocks());
+        _anchors.Clear();
+        _diff = parsed;
+        DiffTitle = string.IsNullOrWhiteSpace(title) ? null : title.Trim();
+        Source = "stream";
+        DocumentReplaced?.Invoke("");
+        DiffReplaced?.Invoke(parsed.Html, DiffTitle);
+        return parsed.Files.Count;
+    }
+
     public void Stop()
     {
         queue.Stop();
         _document = new MarkdownDocument(announceCodeBlocks());
         Source = "";
+        ClearDiff();
         DocumentReplaced?.Invoke("");
     }
 
@@ -117,6 +155,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
             Source = Source,
             CurrentSentence = current,
             TotalSentences = total,
+            DiffFiles = _diff?.Files.Count ?? 0,
         };
     }
 
@@ -128,6 +167,15 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         DocumentReplaced?.Invoke(result.Html);
         queue.Load(result.Sentences, voiceReady());
         return result.Sentences.Count;
+    }
+
+    private void ClearDiff()
+    {
+        _anchors.Clear();
+        if (_diff is null) return;
+        _diff = null;
+        DiffTitle = null;
+        DiffReplaced?.Invoke("", null);
     }
 
     private void RequireVoice()
