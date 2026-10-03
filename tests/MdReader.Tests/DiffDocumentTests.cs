@@ -210,4 +210,58 @@ public class DiffDocumentTests
         var ex = Assert.Throws<ReaderException>(() => DiffDocument.Parse(text));
         Assert.Contains("not a unified diff", ex.Message);
     }
+
+    [Fact]
+    public void Html_has_a_section_per_file_and_a_row_per_line()
+    {
+        var html = DiffDocument.Parse(SampleDiff.Foo).Html;
+
+        Assert.StartsWith(
+            "<section class=\"df\" data-file=\"0\"><div class=\"dfh\"><span class=\"dfk\">modified</span>src/Foo.cs</div>",
+            html);
+        Assert.EndsWith("</section>", html);
+        Assert.Contains(
+            "<div class=\"dl ctx\" data-line=\"1\"><span class=\"dn\">1</span><span class=\"dn\">1</span>" +
+            "<span class=\"dt\"> using System;</span></div>",
+            html);
+        Assert.Contains(
+            "<div class=\"dl del\" data-line=\"2\"><span class=\"dn\">2</span><span class=\"dn\"></span>" +
+            "<span class=\"dt\">-var a = 1;</span></div>",
+            html);
+        Assert.Contains(
+            "<div class=\"dl add\" data-line=\"3\"><span class=\"dn\"></span><span class=\"dn\">2</span>" +
+            "<span class=\"dt\">+var a = 2;</span></div>",
+            html);
+        Assert.Contains(
+            "<div class=\"dl hunk\" data-line=\"7\"><span class=\"dn\"></span><span class=\"dn\"></span>" +
+            "<span class=\"dt\">@@ -10,3 +11,2 @@ void Tail()</span></div>",
+            html);
+    }
+
+    [Fact]
+    public void Html_escapes_code_and_paths()
+    {
+        var diff = string.Join("\n",
+            "--- a/<b>.cs",
+            "+++ b/<b>.cs",
+            "@@ -0,0 +1 @@",
+            "+if (a < b && c == \"x\") {}");
+
+        var html = DiffDocument.Parse(diff).Html;
+
+        Assert.Contains("+if (a &lt; b &amp;&amp; c == &quot;x&quot;) {}", html);
+        Assert.Contains("&lt;b&gt;.cs", html);
+        Assert.DoesNotContain("<b>", html);
+    }
+
+    [Fact]
+    public void Html_marks_binary_files_and_shows_both_names_of_a_rename()
+    {
+        var html = DiffDocument.Parse(SampleDiff.Many).Html;
+
+        Assert.Contains(
+            "<span class=\"dfk\">binary</span>img/logo.png</div><div class=\"dbin\">Binary file</div>", html);
+        Assert.Contains("<span class=\"dfk\">renamed</span>lib/Old.cs → lib/New.cs</div>", html);
+        Assert.Contains("<section class=\"df\" data-file=\"4\">", html);
+    }
 }

@@ -1,3 +1,5 @@
+using System.Net;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace MdReader.Core;
@@ -36,6 +38,11 @@ public sealed partial class DiffDocument
     private DiffDocument(IReadOnlyList<DiffFile> files) => Files = files;
 
     public IReadOnlyList<DiffFile> Files { get; }
+
+    private string? _html;
+
+    /// <summary>One section per file; each line carries its <see cref="DiffLine.Index"/> as data-line.</summary>
+    public string Html => _html ??= Render();
 
     /// <exception cref="ReaderException">The text is not a unified diff.</exception>
     public static DiffDocument Parse(string unifiedDiff)
@@ -253,5 +260,37 @@ public sealed partial class DiffDocument
             tokens.Add(rest[start..i]);
         }
         return tokens.Count == 2 ? (tokens[0], tokens[1]) : null;
+    }
+
+    private string Render()
+    {
+        var html = new StringBuilder();
+        foreach (var file in Files)
+        {
+            var name = file.Kind == DiffFileKind.Renamed && file.OldPath != file.NewPath
+                ? $"{WebUtility.HtmlEncode(file.OldPath)} → {WebUtility.HtmlEncode(file.NewPath)}"
+                : WebUtility.HtmlEncode(file.DisplayPath);
+            html.Append($"<section class=\"df\" data-file=\"{file.Index}\">");
+            html.Append(
+                $"<div class=\"dfh\"><span class=\"dfk\">{file.Kind.ToString().ToLowerInvariant()}</span>{name}</div>");
+            if (file.Kind == DiffFileKind.Binary) html.Append("<div class=\"dbin\">Binary file</div>");
+
+            foreach (var line in file.Lines)
+            {
+                var (css, marker) = line.Kind switch
+                {
+                    DiffLineKind.Added => ("add", "+"),
+                    DiffLineKind.Removed => ("del", "-"),
+                    DiffLineKind.HunkHeader => ("hunk", ""),
+                    _ => ("ctx", " "),
+                };
+                html.Append($"<div class=\"dl {css}\" data-line=\"{line.Index}\">");
+                html.Append($"<span class=\"dn\">{line.OldNumber}</span><span class=\"dn\">{line.NewNumber}</span>");
+                html.Append($"<span class=\"dt\">{marker}{WebUtility.HtmlEncode(line.Text)}</span></div>");
+            }
+
+            html.Append("</section>");
+        }
+        return html.ToString();
     }
 }
