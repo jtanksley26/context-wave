@@ -150,6 +150,23 @@ changed.
 - **Manual:** run setup, start a new Claude Code session, and confirm a reply is read in
   each mode and skipped during a file reading; `setup --remove` stops it.
 
+## Amendments (2026-10-03, from implementation planning)
+
+- The hook entry uses the shell form, `"<path with forward slashes>/MdReader.Bridge.exe" reply-hook`,
+  with `timeout: 10` and `async: true`, instead of `command` plus `args`. The shell form
+  is the long-standing one and works whether Git Bash or cmd runs it. An existing entry
+  written either way is recognised when updating or removing.
+- The real hook message is not captured before the build. Instead, a `Stop` event that
+  lacks `last_assistant_message` is written to the log with the names of the fields it
+  did have, so a wrong assumption is visible at the manual check.
+- The Bridge reads standard input as UTF-8 explicitly.
+- `ReplyHook.RunAsync` takes the sender as a parameter; `ReplyHook.SendTo(pipeName)`
+  provides the real one (300 ms to connect, 5 s overall).
+- A reply queued behind another is separated from it by a horizontal rule.
+- The reader counts as free whenever the queue is idle and no diff is loaded.
+- Setup skips the hook when `~/.claude` does not exist, rather than creating the folder.
+  The hook step runs before the Claude desktop app step.
+
 ## Out of scope
 
 Reading replies as they stream; interim messages between tool calls; subagent replies;
