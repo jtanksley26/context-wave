@@ -84,4 +84,16 @@ public sealed class SettingsTests : IDisposable
         var unknown = Settings.Load(File_);
         Assert.Equal(("neon", "teal"), (unknown.Theme, unknown.Highlight));
     }
+
+    [Fact]
+    public void Visualizer_defaults_round_trips_and_falls_back_when_blank()
+    {
+        Assert.Equal("orb", Settings.Load(File_).Visualizer);
+
+        new Settings { Visualizer = "swarm" }.Save(File_);
+        Assert.Equal("swarm", Settings.Load(File_).Visualizer);
+
+        File.WriteAllText(File_, "{\"Visualizer\":null}");
+        Assert.Equal("orb", Settings.Load(File_).Visualizer);
+    }
 }
