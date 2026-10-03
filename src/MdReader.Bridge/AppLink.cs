@@ -63,8 +63,12 @@ public sealed class AppLink(string pipeName, Func<bool> launchApp, TimeSpan star
 
     private static bool LaunchInstalledApp()
     {
-        var exe = Path.Combine(AppContext.BaseDirectory, "MdReader.App.exe");
-        if (!File.Exists(exe)) return false;
+        // The app sits beside the bridge in a development build, and one folder up in an installed
+        // copy, where the two cannot share a folder because they carry different library versions.
+        var exe = new[] { AppContext.BaseDirectory, Path.Combine(AppContext.BaseDirectory, "..") }
+            .Select(folder => Path.GetFullPath(Path.Combine(folder, "MdReader.App.exe")))
+            .FirstOrDefault(File.Exists);
+        if (exe is null) return false;
         Process.Start(new ProcessStartInfo(exe) { UseShellExecute = true });
         return true;
     }

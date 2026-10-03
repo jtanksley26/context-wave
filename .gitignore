@@ -4,3 +4,5 @@ out/
 out-dev/
 .vs/
 *.user
+out-pkg/
+dist/
