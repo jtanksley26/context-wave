@@ -36,6 +36,9 @@ The first time you pick a voice, the window offers to download it (Kokoro is abo
 Sepia and High contrast. **Settings > Highlight colour** sets the colour used for the sentence
 being read and for the diff lines being talked about. Both apply at once and are remembered.
 
+**Settings > Visualiser** shows a panel above the text that moves with the voice: Orb, Ring
+spectrum, Bars, Waveform or Particle swarm. Off hides it and stops the animation.
+
 ## Connect Claude
 
 ```bash
