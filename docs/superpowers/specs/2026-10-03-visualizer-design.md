@@ -139,6 +139,21 @@ Bridge are not changed.
 - **Manual:** timing against the real voice, appearance of each style, behaviour on
   pause, skip and speed change, and CPU use while reading.
 
+## Amendments (2026-10-03, from implementation planning)
+
+- There is no `VisualizerPump` class. What to send on each tick is decided by
+  `VisualizerFeed` in Core (a frame while playing, one silent frame when playback
+  stops, nothing while at rest), which is unit tested. `MainWindow` owns the 33 ms
+  `DispatcherTimer` that calls it.
+- `NAudioOutput` implements a new Core interface, `IPlaybackProbe`
+  (`TryGetPlayback`), which is what `VisualizerFeed` depends on.
+- `AudioAnalyzer.Analyze` allocates its work buffers on each call (about 12 KB, 30
+  times a second) rather than reusing them, which keeps it free of shared state.
+- `AudioFrame.ToJson()` builds the message for the page with culture-independent
+  numbers; `AudioAnalyzer.BandOf(hz)` reports which band a frequency falls in.
+- `VisualizerCatalog` and the feed live in `Visualizer.cs`.
+- The level is `sqrt(rms / 0.25)`, clamped to 1.
+
 ## Out of scope
 
 A full-window visualiser mode; reacting to the microphone or other applications' audio;
