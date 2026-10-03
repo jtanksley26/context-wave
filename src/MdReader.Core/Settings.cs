@@ -13,6 +13,7 @@ public sealed class Settings
     public string Theme { get; set; } = ThemeCatalog.SystemId;
     public string Highlight { get; set; } = ThemeCatalog.DefaultHighlightId;
     public string Visualizer { get; set; } = VisualizerCatalog.DefaultId;
+    public string Replies { get; set; } = ReplyMode.Off;
 
     public static Settings Load(string path)
     {
@@ -27,6 +28,7 @@ public sealed class Settings
                 if (string.IsNullOrEmpty(loaded.Theme)) loaded.Theme = ThemeCatalog.SystemId;
                 if (string.IsNullOrEmpty(loaded.Highlight)) loaded.Highlight = ThemeCatalog.DefaultHighlightId;
                 if (string.IsNullOrEmpty(loaded.Visualizer)) loaded.Visualizer = VisualizerCatalog.DefaultId;
+                if (string.IsNullOrEmpty(loaded.Replies)) loaded.Replies = ReplyMode.Off;
                 return loaded;
             }
         }

@@ -96,4 +96,16 @@ public sealed class SettingsTests : IDisposable
         File.WriteAllText(File_, "{\"Visualizer\":null}");
         Assert.Equal("orb", Settings.Load(File_).Visualizer);
     }
+
+    [Fact]
+    public void Replies_defaults_to_off_round_trips_and_falls_back_when_blank()
+    {
+        Assert.Equal("off", Settings.Load(File_).Replies);
+
+        new Settings { Replies = "queue" }.Save(File_);
+        Assert.Equal("queue", Settings.Load(File_).Replies);
+
+        File.WriteAllText(File_, "{\"Replies\":null}");
+        Assert.Equal("off", Settings.Load(File_).Replies);
+    }
 }
