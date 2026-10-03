@@ -58,6 +58,8 @@ public static class SetupCommand
             }
         }
 
+        if (ApplyReplyHook(exe, remove) != 0) exitCode = 1;
+
         var directory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Claude");
         if (!Directory.Exists(directory))
@@ -102,6 +104,57 @@ public static class SetupCommand
             exitCode = 1;
         }
         return exitCode;
+    }
+
+    /// <summary>Adds or removes the Stop hook that reads Claude's replies aloud.</summary>
+    private static int ApplyReplyHook(string exe, bool remove)
+    {
+        var directory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+        if (!Directory.Exists(directory))
+        {
+            Console.WriteLine("Claude Code replies hook: no .claude folder; skipped.");
+            return 0;
+        }
+
+        var file = Path.Combine(directory, "settings.json");
+        try
+        {
+            var existing = File.Exists(file) ? File.ReadAllText(file) : null;
+            if (remove && !ClaudeSettings.HasHook(existing))
+            {
+                Console.WriteLine("Claude Code replies hook: was not installed.");
+                return 0;
+            }
+
+            var updated = ClaudeSettings.Apply(existing, exe, remove);
+            if (!string.IsNullOrWhiteSpace(existing)
+                && System.Text.Json.Nodes.JsonNode.DeepEquals(
+                    System.Text.Json.Nodes.JsonNode.Parse(existing), System.Text.Json.Nodes.JsonNode.Parse(updated)))
+            {
+                Console.WriteLine("Claude Code replies hook: already installed.");
+                return 0;
+            }
+
+            if (existing is not null)
+            {
+                var backup = $"{file}.bak-{DateTime.Now:yyyyMMddHHmmss}";
+                File.Copy(file, backup);
+                Console.WriteLine($"Claude Code replies hook: backup saved to {backup}");
+            }
+            File.WriteAllText(file, updated);
+            Console.WriteLine(remove
+                ? "Claude Code replies hook: removed. Start a new Claude Code session to apply."
+                : "Claude Code replies hook: installed. Start a new Claude Code session to apply, " +
+                  "then choose a mode under Settings > Claude's replies in MD Reader.");
+            return 0;
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException
+                                       or ArgumentException or UnauthorizedAccessException)
+        {
+            Console.WriteLine($"Claude Code replies hook: settings left unchanged ({ex.Message}).");
+            return 1;
+        }
     }
 
     /// <summary>Runs a command line through cmd.exe (claude is a .cmd shim) and captures its output.</summary>
