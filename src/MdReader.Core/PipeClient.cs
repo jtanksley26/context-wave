@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Security.Principal;
 using System.Text.Json;
 
 namespace MdReader.Core;
@@ -9,9 +10,14 @@ public static class PipeClient
     public static async Task<PipeResponse> SendAsync(
         string pipeName, PipeRequest request, int connectTimeoutMs, CancellationToken ct = default)
     {
-        await using var pipe = new NamedPipeClientStream(
-            ".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+        // Not PipeOptions.CurrentUserOnly: it refuses a pipe whose owner differs from this process's
+        // default owner, which is the case for a hook run by Claude Code. The owner is checked below.
+        await using var pipe = new NamedPipeClientStream(".", pipeName, PipeDirection.InOut, PipeOptions.Asynchronous);
         await pipe.ConnectAsync(connectTimeoutMs, ct);
+
+        var owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        if (!PipeOwner.IsTrustedForCurrentUser(owner))
+            throw new UnauthorizedAccessException("The pipe is not owned by the current user.");
 
         var bytes = PipeProtocol.Utf8.GetBytes(JsonSerializer.Serialize(request, PipeProtocol.Json) + "\n");
         await pipe.WriteAsync(bytes, ct);

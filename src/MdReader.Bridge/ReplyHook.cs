@@ -41,11 +41,17 @@ public static class ReplyHook
                 FileLog.Write($"reply-hook: no reply text in the Stop event or its transcript (fields: {stop.Fields}).");
                 return 0;
             }
-            await send(new PipeRequest { Op = "speak_reply", Text = reply });
+            var response = await send(new PipeRequest { Op = "speak_reply", Text = reply });
+            // A skipped reply is a success to the hook, so the app's own explanation is the only trace of why.
+            FileLog.Write($"reply-hook: {(response.Ok ? response.Result?.Message : response.Error)}");
         }
-        catch (Exception)
+        catch (Exception ex)
         {
             // Not running, pipe trouble, anything: reading a reply aloud is never worth failing a hook.
+            using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+            FileLog.Write($"reply-hook: could not deliver the reply: {ex.GetType().Name}: {ex.Message} "
+                          + $"(user {identity.User?.Value}, token owner {identity.Owner?.Value}, "
+                          + $"impersonation {identity.ImpersonationLevel}, pid {Environment.ProcessId})");
         }
         return 0;
     }
