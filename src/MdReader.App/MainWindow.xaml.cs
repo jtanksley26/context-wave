@@ -2,6 +2,7 @@ using System.IO;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Threading;
 using MdReader.Core;
 using Microsoft.Win32;
@@ -21,6 +22,12 @@ public partial class MainWindow : Window
     private readonly DocumentView _view;
     private readonly PipeServer _pipe;
     private readonly VisualizerFeed _feed;
+
+    // Read once: enumerating the system's fonts is slow.
+    private readonly List<string> _installedFonts =
+        System.Windows.Media.Fonts.SystemFontFamilies.Select(family => family.Source).ToList();
+
+    private long _lastSizeStep;
 
     // About 30 updates a second; the page animates smoothly between them.
     private readonly DispatcherTimer _visualizerTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
@@ -108,6 +115,10 @@ public partial class MainWindow : Window
         BuildVisualizerMenu();
         ApplyVisualizer();
         BuildRepliesMenu();
+        BuildTextMenus();
+        ApplyText();
+        _view.TextSizeRequested += StepTextSize;
+        PreviewKeyDown += OnWindowPreviewKeyDown;
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         Loaded += OnLoaded;
@@ -300,6 +311,84 @@ public partial class MainWindow : Window
             swatch.Background = ThemeApplier.Brush(shade.HighlightFill);
             swatch.BorderBrush = ThemeApplier.Brush(shade.HighlightBar);
         }
+    }
+
+    private void BuildTextMenus()
+    {
+        AddChoices(TextSizeMenu, TextOptions.Sizes.Select(size => (size.ToString(), $"{size}%")),
+            id => _settings.TextSize = int.Parse(id));
+        AddChoices(FontMenu, TextOptions.AvailableFonts(_installedFonts).Select(font => (font.Id, font.DisplayName)),
+            id => _settings.Font = id);
+        AddChoices(WidthMenu, TextOptions.Widths.Select(width => (width.Id, width.DisplayName)),
+            id => _settings.ColumnWidth = id);
+        AddChoices(SpacingMenu, TextOptions.Spacings.Select(spacing => (spacing.Id, spacing.DisplayName)),
+            id => _settings.LineSpacing = id);
+    }
+
+    /// <summary>Fills a submenu with checkable choices; picking one stores it and re-applies the text.</summary>
+    private void AddChoices(MenuItem menu, IEnumerable<(string Id, string Name)> choices, Action<string> store)
+    {
+        foreach (var (id, name) in choices)
+        {
+            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
+            item.Click += (_, _) =>
+            {
+                store(id);
+                SaveSettings();
+                ApplyText();
+            };
+            menu.Items.Add(item);
+        }
+    }
+
+    /// <summary>Resolves the text choices, sends them to the page and ticks the menus to match.</summary>
+    private void ApplyText()
+    {
+        var text = TextOptions.Resolve(
+            _settings.TextSize, _settings.Font, _settings.ColumnWidth, _settings.LineSpacing, _installedFonts);
+        _view.SetText(text);
+
+        // Clicking a checkable item toggles it first, so set every tick from what was resolved.
+        Tick(TextSizeMenu, text.Size.ToString());
+        Tick(FontMenu, text.Font.Id);
+        Tick(WidthMenu, text.WidthId);
+        Tick(SpacingMenu, text.SpacingId);
+    }
+
+    private static void Tick(MenuItem menu, string id)
+    {
+        foreach (MenuItem item in menu.Items) item.IsChecked = (string)item.Tag == id;
+    }
+
+    /// <summary>One step larger (+1) or smaller (-1), or back to the default size (0).</summary>
+    private void StepTextSize(int direction)
+    {
+        // With focus in the page, Ctrl+plus can arrive both as a key event here and as a message
+        // from the page; take only the first.
+        var now = Environment.TickCount64;
+        if (now - _lastSizeStep < 40) return;
+        _lastSizeStep = now;
+
+        _settings.TextSize = direction == 0
+            ? TextOptions.DefaultSize
+            : TextOptions.StepSize(_settings.TextSize, direction);
+        SaveSettings();
+        ApplyText();
+    }
+
+    private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        if (Keyboard.Modifiers != ModifierKeys.Control) return;
+        int? direction = e.Key switch
+        {
+            Key.OemPlus or Key.Add => 1,
+            Key.OemMinus or Key.Subtract => -1,
+            Key.D0 or Key.NumPad0 => 0,
+            _ => null,
+        };
+        if (direction is not { } step) return;
+        e.Handled = true;
+        StepTextSize(step);
     }
 
     private void BuildRepliesMenu()

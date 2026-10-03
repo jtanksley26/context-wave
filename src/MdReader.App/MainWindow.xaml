@@ -11,13 +11,19 @@
                 <Separator />
                 <MenuItem Header="E_xit" Click="OnExitClick" />
             </MenuItem>
-            <MenuItem Header="_Settings">
-                <MenuItem x:Name="AnnounceCodeItem" Header="Announce _code blocks"
-                          IsCheckable="True" Click="OnAnnounceClick" />
+            <MenuItem Header="_View">
+                <MenuItem x:Name="TextSizeMenu" Header="Text _size" />
+                <MenuItem x:Name="FontMenu" Header="_Font" />
+                <MenuItem x:Name="WidthMenu" Header="Column _width" />
+                <MenuItem x:Name="SpacingMenu" Header="_Line spacing" />
                 <Separator />
                 <MenuItem x:Name="ThemeMenu" Header="_Theme" />
                 <MenuItem x:Name="HighlightMenu" Header="_Highlight colour" />
                 <MenuItem x:Name="VisualizerMenu" Header="_Visualiser" />
+            </MenuItem>
+            <MenuItem Header="_Settings">
+                <MenuItem x:Name="AnnounceCodeItem" Header="Announce _code blocks"
+                          IsCheckable="True" Click="OnAnnounceClick" />
                 <Separator />
                 <MenuItem x:Name="RepliesMenu" Header="Claude's _replies" />
             </MenuItem>
