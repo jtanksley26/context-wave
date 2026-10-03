@@ -21,6 +21,11 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\MdReader.Core\MdReader.Core.csproj" />
     <ProjectReference Include="..\..\src\MdReader.Bridge\MdReader.Bridge.csproj" />
+    <ProjectReference Include="..\..\src\MdReader.App\MdReader.App.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App.WPF" />
   </ItemGroup>
 
 </Project>
