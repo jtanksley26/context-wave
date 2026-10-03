@@ -23,6 +23,12 @@ public partial class MainWindow : Window
     private bool _ready;
     private bool _downloading;
 
+    private const double DiffWindowWidth = 1300;
+
+    // The place in the diff currently shown as focused; the pane is only moved when this changes,
+    // so it does not scroll back on every sentence while the user looks around.
+    private DiffAnchor? _focused;
+
     public MainWindow(string? initialFile)
     {
         InitializeComponent();
@@ -46,11 +52,19 @@ public partial class MainWindow : Window
             _view.Append(html);
             UpdatePosition();
         };
+        _session.DiffReplaced += (html, title) =>
+        {
+            _focused = null;
+            _view.SetDiff(html, title);
+            UpdateTitle();
+            if (html != "") WidenForDiff();
+        };
         _session.ActivateRequested += BringToFront;
 
         _queue.SentenceStarted += id => Dispatcher.InvokeAsync(() =>
         {
             _view.Highlight(id);
+            FollowDiff(id);
             UpdatePosition();
         });
         _queue.StateChanged += _ => Dispatcher.InvokeAsync(() =>
@@ -71,6 +85,10 @@ public partial class MainWindow : Window
         _view.SentenceClicked += id =>
         {
             if (VoiceReady()) _queue.JumpTo(id);
+        };
+        _view.DiffClicked += (file, line) =>
+        {
+            if (VoiceReady() && _session.SentenceForDiff(file, line) is { } id) _queue.JumpTo(id);
         };
         _view.FileDropped += OpenPath;
 
@@ -143,17 +161,37 @@ public partial class MainWindow : Window
         }
     }
 
-    private void UpdateTitle() => Title = _session.Source switch
-    {
-        "" => "MD Reader",
-        "stream" => "MD Reader - from Claude",
-        var path => $"{Path.GetFileName(path)} - MD Reader",
-    };
+    private void UpdateTitle() => Title = _session.DiffTitle is { } title
+        ? $"{title} - MD Reader"
+        : _session.Source switch
+        {
+            "" => "MD Reader",
+            "stream" => "MD Reader - from Claude",
+            var path => $"{Path.GetFileName(path)} - MD Reader",
+        };
 
     private void UpdatePosition()
     {
         var total = _queue.Count;
         PositionText.Text = total == 0 ? "" : $"{Math.Min(_queue.CurrentIndex + 1, total)} / {total}";
+    }
+
+    private void FollowDiff(int sentenceId)
+    {
+        var anchor = _session.AnchorFor(sentenceId);
+        if (anchor == _focused) return;
+        _focused = anchor;
+        if (anchor is null) _view.ClearDiffFocus();
+        else _view.FocusDiff(anchor);
+    }
+
+    /// <summary>Two panes need more room than one; widen a narrow window, staying on the screen.</summary>
+    private void WidenForDiff()
+    {
+        if (WindowState != WindowState.Normal || Width >= DiffWindowWidth) return;
+        var area = SystemParameters.WorkArea;
+        Width = Math.Min(DiffWindowWidth, area.Width);
+        if (Left + Width > area.Right) Left = Math.Max(area.Left, area.Right - Width);
     }
 
     private void UpdateBanner()
