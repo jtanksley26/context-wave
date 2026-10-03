@@ -34,6 +34,12 @@ public sealed class DocumentView(WebView2 webView)
           a { color:inherit; }
           #empty { opacity:.6; margin-top:30vh; text-align:center; }
 
+          /* The visualiser sits flush at the top of the text pane and stays there while text scrolls. */
+          #viz { position:sticky; top:0; z-index:2; height:140px; margin:-24px -32px 16px;
+                 background:var(--bg); border-bottom:1px solid var(--line); pointer-events:none; }
+          #viz.off { display:none; }
+          #viz canvas { display:block; width:100%; height:100%; }
+
           /* Without a diff the page is the single centred column above. */
           #diff, #divider { display:none; }
           body.split { max-width:none; margin:0; padding:0; height:100%; display:flex; overflow:hidden; }
@@ -66,6 +72,7 @@ public sealed class DocumentView(WebView2 webView)
         <div id="diff"><div id="diffTitle"></div><div id="diffBody"></div></div>
         <div id="divider"></div>
         <div id="text">
+          <div id="viz" class="off"><canvas></canvas></div>
           <div id="doc"></div>
           <div id="empty">Open a markdown file, drop one here, or ask Claude to read to you.</div>
         </div>
@@ -100,6 +107,7 @@ public sealed class DocumentView(WebView2 webView)
             const root = document.documentElement;
             for (const name in theme.vars) root.style.setProperty('--' + name, theme.vars[name]);
             root.style.colorScheme = theme.dark ? 'dark' : 'light';
+            wake();
           }
 
           function setDiff(html, title) {
@@ -153,6 +161,252 @@ public sealed class DocumentView(WebView2 webView)
             const percent = Math.min(75, Math.max(25, e.clientX / window.innerWidth * 100));
             document.body.style.setProperty('--diffw', percent + '%');
           });
+
+          // ---- Voice visualiser ----
+          const viz = document.getElementById('viz');
+          const canvas = viz.querySelector('canvas');
+          const ctx = canvas.getContext('2d');
+          const BANDS = 16, WAVE = 64, REST_MS = 3000, TAU = Math.PI * 2;
+          const zeros = n => new Array(n).fill(0);
+          const vz = {
+            style: 'off',
+            target: { level: 0, bands: zeros(BANDS), wave: zeros(WAVE) },
+            level: 0, bands: zeros(BANDS), wave: zeros(WAVE), peaks: zeros(BANDS),
+            rings: [], dots: [], trend: 0, awakeUntil: 0, raf: 0, last: 0, w: 0, h: 0
+          };
+
+          function setVisualizer(style) {
+            vz.style = style;
+            viz.classList.toggle('off', style === 'off');
+            vz.rings = [];
+            if (style === 'off') {
+              cancelAnimationFrame(vz.raf);
+              vz.raf = 0;
+              return;
+            }
+            wake();
+          }
+
+          // frame is { level, bands[16], wave[64] } from the app, about 30 times a second.
+          function pushAudio(frame) {
+            if (vz.style === 'off') return;
+            vz.target = frame;
+            if (frame.level > 0.02) vz.awakeUntil = performance.now() + REST_MS;
+            wake();
+          }
+
+          // Runs the loop for at least a moment, so a change is painted even at rest.
+          function wake() {
+            if (vz.style === 'off') return;
+            const now = performance.now();
+            vz.awakeUntil = Math.max(vz.awakeUntil, now + 600);
+            if (!vz.raf) {
+              vz.last = now;
+              vz.raf = requestAnimationFrame(tick);
+            }
+          }
+
+          function sizeCanvas() {
+            const box = viz.getBoundingClientRect();
+            const ratio = window.devicePixelRatio || 1;
+            vz.w = box.width;
+            vz.h = box.height;
+            const width = Math.round(box.width * ratio), height = Math.round(box.height * ratio);
+            if (canvas.width !== width || canvas.height !== height) {
+              canvas.width = width;
+              canvas.height = height;
+            }
+            ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+          }
+
+          // Moves current towards target; quick on the way up, slower on the way down.
+          function ease(current, target, dt, up, down) {
+            return current + (target - current) * (1 - Math.exp(-dt * (target > current ? up : down)));
+          }
+
+          function tick(now) {
+            vz.raf = 0;
+            if (vz.style === 'off') return;
+            const dt = Math.min(0.05, (now - vz.last) / 1000);
+            vz.last = now;
+            sizeCanvas();
+
+            if (vz.w > 0 && vz.h > 0) {
+              const t = vz.target;
+              vz.level = ease(vz.level, t.level || 0, dt, 30, 6);
+              for (let i = 0; i < BANDS; i++) {
+                vz.bands[i] = ease(vz.bands[i], t.bands[i] || 0, dt, 35, 8);
+                vz.peaks[i] = Math.max(vz.bands[i], vz.peaks[i] - dt * 0.35);
+              }
+              for (let i = 0; i < WAVE; i++) vz.wave[i] = ease(vz.wave[i], t.wave[i] || 0, dt, 40, 40);
+
+              const css = getComputedStyle(document.documentElement);
+              const look = {
+                main: css.getPropertyValue('--focus').trim(),
+                dim: css.getPropertyValue('--fg').trim(),
+                glow: document.documentElement.style.colorScheme === 'dark' ? 14 : 0
+              };
+              // At rest the level never quite reaches zero, which gives the faint slow pulse.
+              const rest = 0.05 + 0.03 * Math.sin(now / 900);
+              const level = Math.max(vz.level, rest);
+
+              ctx.clearRect(0, 0, vz.w, vz.h);
+              ctx.globalAlpha = 1;
+              ctx.lineCap = 'round';
+              ctx.shadowColor = look.main;
+              ctx.shadowBlur = look.glow;
+              (styles[vz.style] || styles.orb)(vz.w, vz.h, level, dt, now, look);
+              ctx.globalAlpha = 1;
+              ctx.shadowBlur = 0;
+            }
+
+            if (now < vz.awakeUntil) vz.raf = requestAnimationFrame(tick);
+          }
+
+          const styles = {
+            orb(w, h, level, dt, now, look) {
+              const cx = w / 2, cy = h / 2, base = h * 0.16;
+              // A ring leaves the core each time the level jumps.
+              if (level - vz.trend > 0.12 && vz.rings.length < 6) vz.rings.push({ r: base * (1 + level), a: 0.7 });
+              vz.trend = ease(vz.trend, level, dt, 8, 8);
+
+              ctx.lineWidth = 1.5;
+              ctx.strokeStyle = look.main;
+              for (const ring of vz.rings) {
+                ring.r += dt * h * 0.9;
+                ring.a -= dt * 0.9;
+                ctx.globalAlpha = Math.max(0, ring.a);
+                ctx.beginPath();
+                ctx.arc(cx, cy, ring.r, 0, TAU);
+                ctx.stroke();
+              }
+              vz.rings = vz.rings.filter(ring => ring.a > 0);
+
+              ctx.strokeStyle = look.dim;
+              ctx.globalAlpha = 0.22;
+              ctx.shadowBlur = 0;
+              for (const k of [0.36, 0.45]) {
+                ctx.beginPath();
+                ctx.arc(cx, cy, h * k, 0, TAU);
+                ctx.stroke();
+              }
+
+              ctx.shadowBlur = look.glow;
+              ctx.fillStyle = look.main;
+              const radius = base * (0.8 + level * 1.5);
+              for (const [scale, alpha] of [[1.5, 0.18], [1.2, 0.4], [0.85, 1]]) {
+                ctx.globalAlpha = alpha;
+                ctx.beginPath();
+                ctx.arc(cx, cy, radius * scale, 0, TAU);
+                ctx.fill();
+              }
+            },
+
+            ring(w, h, level, dt, now, look) {
+              const cx = w / 2, cy = h / 2, inner = h * 0.2, reach = h * 0.26;
+              ctx.strokeStyle = look.dim;
+              ctx.globalAlpha = 0.35;
+              ctx.lineWidth = 1;
+              ctx.shadowBlur = 0;
+              ctx.beginPath();
+              ctx.arc(cx, cy, inner - 4, 0, TAU);
+              ctx.stroke();
+
+              ctx.strokeStyle = look.main;
+              ctx.globalAlpha = 1;
+              ctx.lineWidth = 3;
+              ctx.shadowBlur = look.glow;
+              ctx.beginPath();
+              for (let i = 0; i < BANDS; i++) {
+                const length = 3 + Math.max(vz.bands[i], level * 0.15) * reach;
+                // Low bands at the top, high at the bottom, mirrored on the left.
+                const angle = -Math.PI / 2 + (i + 0.5) / BANDS * Math.PI;
+                for (const a of [angle, Math.PI - angle]) {
+                  const x = Math.cos(a), y = Math.sin(a);
+                  ctx.moveTo(cx + x * inner, cy + y * inner);
+                  ctx.lineTo(cx + x * (inner + length), cy + y * (inner + length));
+                }
+              }
+              ctx.stroke();
+            },
+
+            bars(w, h, level, dt, now, look) {
+              const gap = 5, total = Math.min(w - 40, 520), bar = (total - gap * (BANDS - 1)) / BANDS;
+              const left = (w - total) / 2, floor = h - 14, tall = h - 30;
+              ctx.fillStyle = look.main;
+              for (let i = 0; i < BANDS; i++) {
+                const height = Math.max(2, Math.max(vz.bands[i], level * 0.08) * tall);
+                ctx.globalAlpha = 0.9;
+                ctx.fillRect(left + i * (bar + gap), floor - height, bar, height);
+              }
+              ctx.fillStyle = look.dim;
+              ctx.globalAlpha = 0.5;
+              ctx.shadowBlur = 0;
+              for (let i = 0; i < BANDS; i++) {
+                ctx.fillRect(left + i * (bar + gap), floor - Math.max(4, vz.peaks[i] * tall) - 4, bar, 2);
+              }
+            },
+
+            wave(w, h, level, dt, now, look) {
+              const pad = 16, mid = h / 2, reach = h * 0.4;
+              const trace = sign => {
+                ctx.beginPath();
+                for (let i = 0; i < WAVE; i++) {
+                  const x = pad + i / (WAVE - 1) * (w - pad * 2);
+                  // A slow ripple keeps the line alive at rest.
+                  const y = mid - sign * (vz.wave[i] * reach + Math.sin(i * 0.45 + now / 450) * 1.5);
+                  if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+              };
+              ctx.lineJoin = 'round';
+              ctx.strokeStyle = look.dim;
+              ctx.globalAlpha = 0.25;
+              ctx.lineWidth = 1.5;
+              ctx.shadowBlur = 0;
+              trace(-1);
+              ctx.strokeStyle = look.main;
+              ctx.globalAlpha = 1;
+              ctx.lineWidth = 2;
+              ctx.shadowBlur = look.glow;
+              trace(1);
+            },
+
+            swarm(w, h, level, dt, now, look) {
+              if (vz.dots.length === 0) {
+                for (let i = 0; i < 140; i++) {
+                  vz.dots.push({
+                    angle: Math.random() * TAU,
+                    orbit: 0.25 + Math.random() * 0.75,
+                    speed: (0.25 + Math.random() * 0.9) * (Math.random() < 0.5 ? -1 : 1),
+                    band: Math.floor(Math.random() * BANDS),
+                    radius: 0.3
+                  });
+                }
+              }
+              const cx = w / 2, cy = h / 2, rx = Math.min(w * 0.42, h * 1.7), ry = h * 0.42;
+              ctx.fillStyle = look.main;
+              ctx.globalAlpha = 0.35 + 0.6 * Math.min(1, level * 1.4);
+              ctx.beginPath();
+              for (const dot of vz.dots) {
+                const band = vz.bands[dot.band];
+                dot.angle += dt * dot.speed * (0.4 + level * 1.8);
+                // Loud syllables fling the dots out; in quiet they drift back towards the centre.
+                dot.radius = ease(dot.radius, dot.orbit * (0.3 + level * 0.75) + band * 0.2, dt, 10, 3);
+                const x = cx + Math.cos(dot.angle) * dot.radius * rx;
+                const y = cy + Math.sin(dot.angle) * dot.radius * ry;
+                const size = 1 + band * 2.2;
+                ctx.moveTo(x + size, y);
+                ctx.arc(x, y, size, 0, TAU);
+              }
+              ctx.fill();
+            }
+          };
+
+          window.addEventListener('resize', wake);
+          if (window.chrome && window.chrome.webview && window.chrome.webview.addEventListener) {
+            window.chrome.webview.addEventListener('message', e => pushAudio(e.data));
+          }
         </script>
         </body>
         </html>
@@ -160,6 +414,7 @@ public sealed class DocumentView(WebView2 webView)
 
     private bool _loaded;
     private ResolvedTheme? _theme;
+    private string _visualizer = VisualizerCatalog.OffId;
 
     public event Action<int>? SentenceClicked;
     public event Action<string>? FileDropped;
@@ -196,6 +451,7 @@ public sealed class DocumentView(WebView2 webView)
         core.NavigationStarting += OnNavigationStarting;
         _loaded = true;
         if (_theme is not null) SetTheme(_theme);
+        SetVisualizer(_visualizer);
     }
 
     public void SetDocument(string html) => Run($"setDoc({JsonSerializer.Serialize(html)})");
@@ -213,6 +469,19 @@ public sealed class DocumentView(WebView2 webView)
         webView.DefaultBackgroundColor = System.Drawing.Color.FromArgb(r, g, b);
         var payload = new { dark = theme.IsDark, vars = theme.PageVariables() };
         Run($"setTheme({JsonSerializer.Serialize(payload)})");
+    }
+
+    /// <summary>Shows the visualiser in this style, or hides it for "off". Applies once the page has loaded.</summary>
+    public void SetVisualizer(string id)
+    {
+        _visualizer = id;
+        Run($"setVisualizer({JsonSerializer.Serialize(id)})");
+    }
+
+    /// <summary>Sends one instant of sound to the visualiser.</summary>
+    public void PushAudio(AudioFrame frame)
+    {
+        if (_loaded) webView.CoreWebView2.PostWebMessageAsJson(frame.ToJson());
     }
 
     /// <summary>Shows the diff pane with this HTML, or hides it when the HTML is empty.</summary>
