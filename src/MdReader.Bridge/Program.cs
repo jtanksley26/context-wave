@@ -1,10 +1,18 @@
 using MdReader.Bridge;
+using MdReader.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 if (args.Length > 0)
 {
+    if (args[0] == "reply-hook")
+    {
+        // Claude Code sends UTF-8; the console's own input encoding would garble quotes and dashes.
+        using var input = new StreamReader(Console.OpenStandardInput(), PipeProtocol.Utf8);
+        return await ReplyHook.RunAsync(input, ReplyHook.SendTo(PipeProtocol.DefaultPipeName));
+    }
+
     // Both usage paths return before any configuration code runs.
     if (args[0] != "setup")
     {
