@@ -2,6 +2,7 @@ using System.IO;
 using System.Net.Http;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Threading;
 using MdReader.Core;
 using Microsoft.Win32;
 
@@ -19,6 +20,10 @@ public partial class MainWindow : Window
     private readonly ReaderSession _session;
     private readonly DocumentView _view;
     private readonly PipeServer _pipe;
+    private readonly VisualizerFeed _feed;
+
+    // About 30 updates a second; the page animates smoothly between them.
+    private readonly DispatcherTimer _visualizerTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
     private readonly string? _initialFile;
     private bool _ready;
     private bool _downloading;
@@ -94,6 +99,13 @@ public partial class MainWindow : Window
 
         BuildThemeMenus();
         ApplyTheme();
+        _feed = new VisualizerFeed(_output);
+        _visualizerTimer.Tick += (_, _) =>
+        {
+            if (_feed.Next() is { } frame) _view.PushAudio(frame);
+        };
+        BuildVisualizerMenu();
+        ApplyVisualizer();
         SystemEvents.UserPreferenceChanged += OnUserPreferenceChanged;
 
         Loaded += OnLoaded;
@@ -132,6 +144,7 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _visualizerTimer.Stop();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _pipe.Dispose();
         _queue.Stop();
@@ -284,6 +297,41 @@ public partial class MainWindow : Window
             swatch.Background = ThemeApplier.Brush(shade.HighlightFill);
             swatch.BorderBrush = ThemeApplier.Brush(shade.HighlightBar);
         }
+    }
+
+    private void BuildVisualizerMenu()
+    {
+        foreach (var (id, name) in VisualizerCatalog.Choices)
+        {
+            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
+            item.Click += OnVisualizerClick;
+            VisualizerMenu.Items.Add(item);
+        }
+    }
+
+    /// <summary>Shows the chosen style and runs the timer only while the visualiser is on.</summary>
+    private void ApplyVisualizer()
+    {
+        var id = VisualizerCatalog.Normalize(_settings.Visualizer);
+        foreach (MenuItem item in VisualizerMenu.Items) item.IsChecked = (string)item.Tag == id;
+        _view.SetVisualizer(id);
+
+        if (id == VisualizerCatalog.OffId)
+        {
+            _visualizerTimer.Stop();
+            _feed.Reset();
+        }
+        else
+        {
+            _visualizerTimer.Start();
+        }
+    }
+
+    private void OnVisualizerClick(object sender, RoutedEventArgs e)
+    {
+        _settings.Visualizer = (string)((MenuItem)sender).Tag;
+        SaveSettings();
+        ApplyVisualizer();
     }
 
     private void OnThemeClick(object sender, RoutedEventArgs e)
