@@ -46,6 +46,19 @@ public class ClaudeSettingsTests
     }
 
     [Fact]
+    public void Leaves_the_users_own_text_unescaped()
+    {
+        const string existing = """
+            { "note": "café & crème", "hooks": { "Stop": [ { "hooks": [ { "type": "command", "command": "a && b > 'c'" } ] } ] } }
+            """;
+        var json = ClaudeSettings.Apply(existing, Exe, remove: false);
+
+        Assert.Contains("café & crème", json);
+        Assert.Contains("a && b > 'c'", json);
+        Assert.DoesNotContain(@"\u00", json);
+    }
+
+    [Fact]
     public void Adding_again_updates_the_path_without_duplicating()
     {
         var first = ClaudeSettings.Apply(null, @"D:\old\MdReader.Bridge.exe", remove: false);

@@ -167,6 +167,20 @@ changed.
 - Setup skips the hook when `~/.claude` does not exist, rather than creating the folder.
   The hook step runs before the Claude desktop app step.
 
+## Amendments (2026-10-03, from review)
+
+- A document that is not a reply and has not finished playing counts as busy even when
+  the queue is idle. This covers a file opened before the voice was installed, which is
+  loaded but not yet read.
+- A reply that yields no sentences (for example only a code block while announcements
+  are off) is skipped before anything is changed.
+- Setup writes `settings.json` to a temporary file and moves it into place, uses a JSON
+  encoder that leaves the user's existing text unescaped, and honours
+  `CLAUDE_CONFIG_DIR`.
+- The hook stops waiting for standard input after 2 seconds.
+- Claude Code runs hooks through Git Bash on Windows; the command string is written for
+  that shell.
+
 ## Out of scope
 
 Reading replies as they stream; interim messages between tool calls; subagent replies;

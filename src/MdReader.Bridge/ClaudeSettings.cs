@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -75,7 +76,8 @@ public static class ClaudeSettings
                 ["hooks"] = new JsonArray(new JsonObject
                 {
                     ["type"] = "command",
-                    // Forward slashes and quotes work in both Git Bash and cmd, whichever runs the hook.
+                    // Claude Code runs hooks through Git Bash on Windows; forward slashes avoid its
+                    // backslash escaping, and the quotes allow a path with spaces.
                     ["command"] = $"\"{bridgeExePath.Replace('\\', '/')}\" {HookArgument}",
                     ["timeout"] = 10,
                     ["async"] = true,
@@ -85,7 +87,13 @@ public static class ClaudeSettings
 
         if (stop is { Count: 0 }) hooks!.Remove("Stop");
         if (hooks is { Count: 0 }) root.Remove("hooks");
-        return root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+        // The relaxed encoder leaves the user's own text ("a && b", accented paths) as they wrote it;
+        // the default one would rewrite it as \uXXXX escapes.
+        return root.ToJsonString(new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        });
     }
 
     /// <summary>The "hooks" array of one entry of an event's list, or null when it has another shape.</summary>

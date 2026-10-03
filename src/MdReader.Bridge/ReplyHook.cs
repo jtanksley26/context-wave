@@ -12,12 +12,16 @@ public static class ReplyHook
 {
     private const int ConnectTimeoutMs = 300;
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(5);
+    private static readonly TimeSpan InputTimeout = TimeSpan.FromSeconds(2);
 
     public static async Task<int> RunAsync(TextReader input, Func<PipeRequest, Task<PipeResponse>> send)
     {
         try
         {
-            var reply = ExtractReply(await input.ReadToEndAsync());
+            // Claude Code closes standard input after the message; do not wait forever if something else does not.
+            var reading = input.ReadToEndAsync();
+            if (await Task.WhenAny(reading, Task.Delay(InputTimeout)) != reading) return 0;
+            var reply = ExtractReply(await reading);
             if (reply is not null) await send(new PipeRequest { Op = "speak_reply", Text = reply });
         }
         catch (Exception)

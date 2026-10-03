@@ -109,8 +109,11 @@ public static class SetupCommand
     /// <summary>Adds or removes the Stop hook that reads Claude's replies aloud.</summary>
     private static int ApplyReplyHook(string exe, bool remove)
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+        // Claude Code keeps its settings in ~/.claude unless CLAUDE_CONFIG_DIR points elsewhere.
+        var configured = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+        var directory = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude")
+            : configured;
         if (!Directory.Exists(directory))
         {
             Console.WriteLine("Claude Code replies hook: no .claude folder; skipped.");
@@ -142,7 +145,10 @@ public static class SetupCommand
                 File.Copy(file, backup);
                 Console.WriteLine($"Claude Code replies hook: backup saved to {backup}");
             }
-            File.WriteAllText(file, updated);
+            // Write beside the file and swap it in, so a failure cannot leave the settings half-written.
+            var temporary = file + ".mdreader-tmp";
+            File.WriteAllText(temporary, updated);
+            File.Move(temporary, file, overwrite: true);
             Console.WriteLine(remove
                 ? "Claude Code replies hook: removed. Start a new Claude Code session to apply."
                 : "Claude Code replies hook: installed. Start a new Claude Code session to apply, " +

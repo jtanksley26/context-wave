@@ -91,6 +91,27 @@ public class ReplyHookTests
         }
     }
 
+    private sealed class NeverEndingReader : TextReader
+    {
+        public override Task<string> ReadToEndAsync() => new TaskCompletionSource<string>().Task;
+    }
+
+    [Fact]
+    public async Task Run_gives_up_when_standard_input_is_never_closed()
+    {
+        var calls = 0;
+        var clock = Stopwatch.StartNew();
+        var exit = await ReplyHook.RunAsync(new NeverEndingReader(), _ =>
+        {
+            calls++;
+            return Task.FromResult(PipeResponse.Success("ok"));
+        });
+
+        Assert.Equal(0, exit);
+        Assert.Equal(0, calls);
+        Assert.True(clock.ElapsedMilliseconds < 5000, $"took {clock.ElapsedMilliseconds} ms");
+    }
+
     [Fact]
     public async Task Run_returns_zero_when_the_app_answers_with_an_error()
     {
