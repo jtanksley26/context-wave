@@ -253,9 +253,8 @@ public partial class MainWindow : Window
                 Width = 14,
                 Height = 14,
                 CornerRadius = new CornerRadius(3),
-                BorderThickness = new Thickness(1),
+                BorderThickness = new Thickness(2),
             };
-            swatch.SetResourceReference(Border.BorderBrushProperty, "ControlBorderBrush");
             var item = new MenuItem { Header = highlight.DisplayName, Tag = highlight.Id, IsCheckable = true, Icon = swatch };
             item.Click += OnHighlightClick;
             HighlightMenu.Items.Add(item);
@@ -280,7 +279,10 @@ public partial class MainWindow : Window
             var id = (string)item.Tag;
             item.IsChecked = id == resolved.Highlight.Id;
             var shade = ThemeCatalog.Resolve(resolved.Theme.Id, id, systemIsDark);
-            ((Border)item.Icon).Background = ThemeApplier.Brush(shade.HighlightFill);
+            // Fill inside, bar colour as the edge: the fill alone is too dim to tell apart on dark themes.
+            var swatch = (Border)item.Icon;
+            swatch.Background = ThemeApplier.Brush(shade.HighlightFill);
+            swatch.BorderBrush = ThemeApplier.Brush(shade.HighlightBar);
         }
     }
 
