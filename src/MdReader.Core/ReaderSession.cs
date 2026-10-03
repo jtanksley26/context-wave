@@ -129,7 +129,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
 
         var result = _document.Append(text);
         var html = result.Html;
-        if (anchor is not null)
+        if (anchor is not null && result.Sentences.Count > 0)
         {
             foreach (var sentence in result.Sentences) _anchors[sentence.Id] = anchor;
             html = $"<div class=\"focus-label\">{WebUtility.HtmlEncode(anchor.Label)}</div>{html}";

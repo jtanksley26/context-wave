@@ -12,12 +12,13 @@ public sealed class ReaderSessionTests : IDisposable
     private readonly List<string> _appended = [];
     private readonly List<(string Html, string? Title)> _diffs = [];
     private bool _voiceReady = true;
+    private bool _announce = true;
 
     public ReaderSessionTests()
     {
         _queue = new ReadingQueue(
             new FakeTts(), _output, () => new VoiceSettings("m", 0, 1f), (_, _) => Task.CompletedTask);
-        _session = new ReaderSession(_queue, () => true, () => _voiceReady);
+        _session = new ReaderSession(_queue, () => _announce, () => _voiceReady);
         _session.DocumentReplaced += _replaced.Add;
         _session.DocumentAppended += _appended.Add;
         _session.DiffReplaced += (html, title) => _diffs.Add((html, title));
@@ -391,6 +392,44 @@ public sealed class ReaderSessionTests : IDisposable
         Assert.Equal(1, _queue.Count);
         Assert.Equal("Foo.cs:3", _session.AnchorFor(0)!.Label);
         Assert.StartsWith("<div class=\"focus-label\">Foo.cs:3</div>", _replaced.Last());
+    }
+
+    [Fact]
+    public void Speak_replace_without_focus_drops_the_links()
+    {
+        ShowDiff(SampleDiff.Foo);
+        Speak("One.", focus: "Foo.cs:2");
+        Speak("Again.", "replace");
+
+        Assert.Null(_session.AnchorFor(0));
+        Assert.Null(_session.SentenceForDiff(0, null));
+        Assert.Equal(1, Status().DiffFiles);
+    }
+
+    [Fact]
+    public void Stop_and_opening_a_file_drop_the_links()
+    {
+        ShowDiff(SampleDiff.Foo);
+        Speak("One.", focus: "Foo.cs:2");
+        _session.Handle(new PipeRequest { Op = "stop" });
+        Assert.Null(_session.AnchorFor(0));
+
+        ShowDiff(SampleDiff.Foo);
+        Speak("One.", focus: "Foo.cs:2");
+        Assert.True(ReadFile(Write("a.md", "One.")).Ok);
+        Assert.Null(_session.SentenceForDiff(0, null));
+    }
+
+    [Fact]
+    public void Speak_with_focus_on_text_without_sentences_adds_no_label()
+    {
+        _announce = false;
+        ShowDiff(SampleDiff.Foo);
+        var response = Speak("~~~\ncode\n~~~", focus: "Foo.cs:2");
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Equal(0, _queue.Count);
+        Assert.DoesNotContain("focus-label", Assert.Single(_appended));
     }
 
     [Fact]
