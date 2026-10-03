@@ -14,6 +14,10 @@ public sealed class Settings
     public string Highlight { get; set; } = ThemeCatalog.DefaultHighlightId;
     public string Visualizer { get; set; } = VisualizerCatalog.DefaultId;
     public string Replies { get; set; } = ReplyMode.Off;
+    public int TextSize { get; set; } = TextOptions.DefaultSize;
+    public string Font { get; set; } = TextOptions.DefaultFontId;
+    public string ColumnWidth { get; set; } = TextOptions.DefaultWidthId;
+    public string LineSpacing { get; set; } = TextOptions.DefaultSpacingId;
 
     public static Settings Load(string path)
     {
@@ -29,6 +33,10 @@ public sealed class Settings
                 if (string.IsNullOrEmpty(loaded.Highlight)) loaded.Highlight = ThemeCatalog.DefaultHighlightId;
                 if (string.IsNullOrEmpty(loaded.Visualizer)) loaded.Visualizer = VisualizerCatalog.DefaultId;
                 if (string.IsNullOrEmpty(loaded.Replies)) loaded.Replies = ReplyMode.Off;
+                if (loaded.TextSize <= 0) loaded.TextSize = TextOptions.DefaultSize;
+                if (string.IsNullOrEmpty(loaded.Font)) loaded.Font = TextOptions.DefaultFontId;
+                if (string.IsNullOrEmpty(loaded.ColumnWidth)) loaded.ColumnWidth = TextOptions.DefaultWidthId;
+                if (string.IsNullOrEmpty(loaded.LineSpacing)) loaded.LineSpacing = TextOptions.DefaultSpacingId;
                 return loaded;
             }
         }

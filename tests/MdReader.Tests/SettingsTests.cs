@@ -108,4 +108,25 @@ public sealed class SettingsTests : IDisposable
         File.WriteAllText(File_, "{\"Replies\":null}");
         Assert.Equal("off", Settings.Load(File_).Replies);
     }
+
+    [Fact]
+    public void Text_options_default_round_trip_and_fall_back()
+    {
+        var defaults = Settings.Load(File_);
+        Assert.Equal(
+            (100, "segoe", "medium", "normal"),
+            (defaults.TextSize, defaults.Font, defaults.ColumnWidth, defaults.LineSpacing));
+
+        new Settings { TextSize = 150, Font = "georgia", ColumnWidth = "wide", LineSpacing = "relaxed" }.Save(File_);
+        var loaded = Settings.Load(File_);
+        Assert.Equal(
+            (150, "georgia", "wide", "relaxed"),
+            (loaded.TextSize, loaded.Font, loaded.ColumnWidth, loaded.LineSpacing));
+
+        File.WriteAllText(File_, "{\"TextSize\":0,\"Font\":null,\"ColumnWidth\":\"\",\"LineSpacing\":null}");
+        var blank = Settings.Load(File_);
+        Assert.Equal(
+            (100, "segoe", "medium", "normal"),
+            (blank.TextSize, blank.Font, blank.ColumnWidth, blank.LineSpacing));
+    }
 }
