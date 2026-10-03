@@ -60,4 +60,28 @@ public sealed class SettingsTests : IDisposable
         Assert.Equal(2.0f, new Settings { Speed = 9f }.ToVoice().Speed);
         Assert.Equal(0.5f, new Settings { Speed = 0.1f }.ToVoice().Speed);
     }
+
+    [Fact]
+    public void Theme_and_highlight_default_and_round_trip()
+    {
+        var defaults = Settings.Load(File_);
+        Assert.Equal(("system", "yellow"), (defaults.Theme, defaults.Highlight));
+
+        new Settings { Theme = "sepia", Highlight = "blue" }.Save(File_);
+        var loaded = Settings.Load(File_);
+        Assert.Equal(("sepia", "blue"), (loaded.Theme, loaded.Highlight));
+    }
+
+    [Fact]
+    public void Null_or_empty_theme_and_highlight_fall_back_and_unknown_ids_are_kept()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(File_)!);
+        File.WriteAllText(File_, "{\"Theme\":null,\"Highlight\":\"\"}");
+        var blank = Settings.Load(File_);
+        Assert.Equal(("system", "yellow"), (blank.Theme, blank.Highlight));
+
+        File.WriteAllText(File_, "{\"Theme\":\"neon\",\"Highlight\":\"teal\"}");
+        var unknown = Settings.Load(File_);
+        Assert.Equal(("neon", "teal"), (unknown.Theme, unknown.Highlight));
+    }
 }
