@@ -54,6 +54,20 @@ For a code walkthrough, Claude calls `show_diff` with a unified diff and then `s
 `focus` such as `src/Foo.cs:120-140`. The window shows the diff beside the explanation and
 scrolls it to the lines being talked about. Clicking a diff line jumps to its explanation.
 
+## Reading Claude's replies
+
+`setup` also installs a Claude Code hook that passes each finished reply to MD Reader. Choose
+what happens under **Settings > Claude's replies**:
+
+- **Off** (the default): replies are not read.
+- **Switch to the newest**: a new reply replaces the one being read.
+- **Queue**: a new reply is read after the current one.
+- **Finish the current one**: a new reply is ignored while one is being read.
+
+A reply never interrupts a file, text Claude was asked to speak, or a diff walkthrough, and
+nothing is read unless MD Reader is already open. The hook applies to Claude Code sessions
+(the terminal and the desktop app's Code tab) started after `setup` was run.
+
 ## Environment
 
 Setting `MDREADER_HOME` changes where settings, logs and voices are stored (the
