@@ -154,6 +154,19 @@ Bridge are not changed.
 - `VisualizerCatalog` and the feed live in `Visualizer.cs`.
 - The level is `sqrt(rms / 0.25)`, clamped to 1.
 
+## Amendments (2026-10-03, from the browser check)
+
+- The Orb has a smaller core and two broken rings that turn in opposite directions,
+  faster as the level rises, instead of two static guide rings.
+- The page spreads band values before drawing (`((band - 0.3) / 0.7) ^ 1.6`), because
+  speech keeps most bands well above the floor and the styles looked uniformly full.
+- The panel absorbs clicks rather than ignoring them; passing them through would have
+  activated sentences scrolled underneath it.
+- In the split layout the panel uses `top: -24px`, since sticky is measured from inside
+  the text pane's padding.
+- The animation loop keeps running until any Orb ring has faded.
+- A failed post to the page is ignored, and a non-finite number is written as 0.
+
 ## Out of scope
 
 A full-window visualiser mode; reacting to the microphone or other applications' audio;
