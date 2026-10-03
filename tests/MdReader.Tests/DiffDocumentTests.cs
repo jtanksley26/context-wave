@@ -124,10 +124,87 @@ public class DiffDocumentTests
         Assert.Equal(new DiffLine(2, DiffLineKind.Context, 2, 2, ""), lines[2]);
     }
 
+    [Fact]
+    public void Git_quoted_paths_are_decoded()
+    {
+        var diff = string.Join("\n",
+            "diff --git \"a/caf\\303\\251.txt\" \"b/caf\\303\\251.txt\"",
+            "--- \"a/caf\\303\\251.txt\"",
+            "+++ \"b/caf\\303\\251.txt\"",
+            "@@ -1 +1 @@",
+            "-a",
+            "+b");
+
+        var file = Assert.Single(DiffDocument.Parse(diff).Files);
+        Assert.Equal(("café.txt", "café.txt", "café.txt"), (file.OldPath, file.NewPath, file.DisplayPath));
+    }
+
+    [Fact]
+    public void A_header_only_binary_diff_with_quoted_paths_uses_the_git_line()
+    {
+        var diff = string.Join("\n",
+            "diff --git \"a/caf\\303\\251.png\" \"b/caf\\303\\251.png\"",
+            "Binary files \"a/caf\\303\\251.png\" and \"b/caf\\303\\251.png\" differ");
+
+        var file = Assert.Single(DiffDocument.Parse(diff).Files);
+        Assert.Equal("café.png", file.DisplayPath);
+    }
+
+    [Fact]
+    public void Quoted_rename_paths_are_decoded()
+    {
+        var diff = string.Join("\n",
+            "diff --git \"a/old \\303\\251.txt\" \"b/new \\303\\251.txt\"",
+            "similarity index 100%",
+            "rename from \"old \\303\\251.txt\"",
+            "rename to \"new \\303\\251.txt\"");
+
+        var file = Assert.Single(DiffDocument.Parse(diff).Files);
+        Assert.Equal(("old é.txt", "new é.txt"), (file.OldPath, file.NewPath));
+    }
+
+    [Fact]
+    public void A_rename_only_diff_is_a_file_with_no_lines()
+    {
+        var diff = string.Join("\n",
+            "diff --git a/old.txt b/new.txt",
+            "similarity index 100%",
+            "rename from old.txt",
+            "rename to new.txt");
+
+        var file = Assert.Single(DiffDocument.Parse(diff).Files);
+        Assert.Equal(DiffFileKind.Renamed, file.Kind);
+        Assert.Empty(file.Lines);
+    }
+
+    [Fact]
+    public void A_mode_only_diff_is_a_modified_file_with_no_lines()
+    {
+        var diff = string.Join("\n",
+            "diff --git a/run.sh b/run.sh",
+            "old mode 100644",
+            "new mode 100755");
+
+        var file = Assert.Single(DiffDocument.Parse(diff).Files);
+        Assert.Equal(DiffFileKind.Modified, file.Kind);
+        Assert.Empty(file.Lines);
+    }
+
+    [Fact]
+    public void Text_before_the_first_file_is_ignored()
+    {
+        var withPreamble = DiffDocument.Parse("From: someone\nSubject: change\n\n" + SampleDiff.Foo);
+        var alone = DiffDocument.Parse(SampleDiff.Foo);
+
+        var file = Assert.Single(withPreamble.Files);
+        Assert.Equal(alone.Files[0], file with { Lines = alone.Files[0].Lines });
+        Assert.Equal(alone.Files[0].Lines, file.Lines);
+    }
+
     [Theory]
     [InlineData("just some text\nwith lines")]
     [InlineData("--- not a diff\nstill not")]
-    [InlineData("diff --git a/x b/x\nindex 1..2")]
+    [InlineData("@@ -1 +1 @@\n-a\n+b")]
     public void Rejects_text_that_is_not_a_diff(string text)
     {
         var ex = Assert.Throws<ReaderException>(() => DiffDocument.Parse(text));

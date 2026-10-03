@@ -84,8 +84,19 @@ public sealed partial class DiffDocument
             {
                 current = new FileBuilder(fromGit: true);
                 builders.Add(current);
+                var rest = line["diff --git ".Length..];
                 var git = GitHeader().Match(line);
-                if (git.Success)
+                if (rest.Contains('"'))
+                {
+                    if (SplitQuotedPair(rest) is var (first, second))
+                    {
+                        first = Unquote(first);
+                        second = Unquote(second);
+                        current.OldPath = first.StartsWith("a/", StringComparison.Ordinal) ? first[2..] : first;
+                        current.NewPath = second.StartsWith("b/", StringComparison.Ordinal) ? second[2..] : second;
+                    }
+                }
+                else if (git.Success)
                 {
                     current.OldPath = git.Groups[1].Value;
                     current.NewPath = git.Groups[2].Value;
@@ -121,12 +132,12 @@ public sealed partial class DiffDocument
             }
             else if (line.StartsWith("rename from ", StringComparison.Ordinal))
             {
-                current.OldPath = line["rename from ".Length..];
+                current.OldPath = Unquote(line["rename from ".Length..]);
                 current.Kind = DiffFileKind.Renamed;
             }
             else if (line.StartsWith("rename to ", StringComparison.Ordinal))
             {
-                current.NewPath = line["rename to ".Length..];
+                current.NewPath = Unquote(line["rename to ".Length..]);
             }
             else if (line.StartsWith("Binary files ", StringComparison.Ordinal) || line == "GIT binary patch")
             {
@@ -150,10 +161,10 @@ public sealed partial class DiffDocument
                 b.OldPath != "" ? b.OldPath : b.NewPath,
                 b.NewPath != "" ? b.NewPath : b.OldPath,
                 b.Kind,
-                b.Lines))
+                b.Lines.ToArray()))
             .ToList();
 
-        if (!files.Any(f => f.Lines.Count > 0 || f.Kind == DiffFileKind.Binary))
+        if (files.Count == 0)
             throw new ReaderException("That text is not a unified diff.");
         return new DiffDocument(files);
     }
@@ -163,10 +174,84 @@ public sealed partial class DiffDocument
     {
         var tab = value.IndexOf('\t');
         if (tab >= 0) value = value[..tab];
-        value = value.Trim();
+        value = Unquote(value.Trim());
         if (value == "/dev/null") return null;
         return value.StartsWith("a/", StringComparison.Ordinal) || value.StartsWith("b/", StringComparison.Ordinal)
             ? value[2..]
             : value;
+    }
+
+    /// <summary>Decodes a git C-style quoted path; any other value is returned unchanged.</summary>
+    private static string Unquote(string value)
+    {
+        if (value.Length < 2 || value[0] != '"' || value[^1] != '"') return value;
+
+        var bytes = new List<byte>();
+        var inner = value[1..^1];
+        for (var i = 0; i < inner.Length; i++)
+        {
+            var c = inner[i];
+            if (c != '\\' || i == inner.Length - 1)
+            {
+                // Keep a surrogate pair together so the code point survives encoding.
+                var length = char.IsHighSurrogate(c) && i + 1 < inner.Length ? 2 : 1;
+                bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(inner.Substring(i, length)));
+                i += length - 1;
+                continue;
+            }
+
+            c = inner[++i];
+            switch (c)
+            {
+                case 'a': bytes.Add(7); break;
+                case 'b': bytes.Add(8); break;
+                case 'f': bytes.Add(12); break;
+                case 'n': bytes.Add(10); break;
+                case 'r': bytes.Add(13); break;
+                case 't': bytes.Add(9); break;
+                case 'v': bytes.Add(11); break;
+                case >= '0' and <= '7':
+                    var octal = c - '0';
+                    for (var digits = 1; digits < 3 && i + 1 < inner.Length && inner[i + 1] is >= '0' and <= '7'; digits++)
+                        octal = octal * 8 + (inner[++i] - '0');
+                    bytes.Add((byte)octal);
+                    break;
+                default: // \\ and \" (and anything unknown) stand for themselves
+                    bytes.AddRange(System.Text.Encoding.UTF8.GetBytes(c.ToString()));
+                    break;
+            }
+        }
+        return System.Text.Encoding.UTF8.GetString(bytes.ToArray());
+    }
+
+    /// <summary>Splits the two path tokens of a "diff --git" line, each quoted or a bare run.</summary>
+    private static (string, string)? SplitQuotedPair(string rest)
+    {
+        var tokens = new List<string>();
+        var i = 0;
+        while (i < rest.Length && tokens.Count < 2)
+        {
+            if (rest[i] == ' ') { i++; continue; }
+            var start = i;
+            if (rest[i] == '"')
+            {
+                i++;
+                while (i < rest.Length && rest[i] != '"') i += rest[i] == '\\' ? 2 : 1;
+                i = Math.Min(i + 1, rest.Length);
+            }
+            else if (tokens.Count == 0)
+            {
+                // A bare first token ends at the space before the second token ("b/" or a quote).
+                var next = rest.IndexOf(" b/", i, StringComparison.Ordinal);
+                var quote = rest.IndexOf(" \"", i, StringComparison.Ordinal);
+                i = next >= 0 && (quote < 0 || next < quote) ? next : quote >= 0 ? quote : rest.Length;
+            }
+            else
+            {
+                i = rest.Length;
+            }
+            tokens.Add(rest[start..i]);
+        }
+        return tokens.Count == 2 ? (tokens[0], tokens[1]) : null;
     }
 }
