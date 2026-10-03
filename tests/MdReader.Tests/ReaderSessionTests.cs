@@ -617,6 +617,61 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
+    public void A_reply_does_not_replace_a_file_that_was_loaded_but_never_read()
+    {
+        _voiceReady = false;
+        var path = Write("a.md", "One. Two.");
+        _session.OpenFile(path);
+        _voiceReady = true;
+        var response = Reply("Done.");
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Contains("something else", response.Result!.Message);
+        Assert.Equal(path, _session.Source);
+        Assert.Equal(2, _queue.Count);
+    }
+
+    [Fact]
+    public void A_reply_with_nothing_to_read_does_not_cut_off_the_reply_being_read()
+    {
+        Reply("One. Two.");
+        _announce = false;
+        var response = Reply("~~~\ncode\n~~~");
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Contains("nothing to read", response.Result!.Message);
+        Assert.Equal(2, _queue.Count);
+        Assert.Equal(ReadingState.Playing, _queue.State);
+        Assert.Single(_replaced);
+        Assert.Empty(_appended);
+    }
+
+    [Fact]
+    public void A_reply_with_nothing_to_read_is_not_queued()
+    {
+        _replies = "queue";
+        Reply("One. Two.");
+        _announce = false;
+        var response = Reply("~~~\ncode\n~~~");
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Contains("nothing to read", response.Result!.Message);
+        Assert.Equal(2, _queue.Count);
+        Assert.Empty(_appended);
+    }
+
+    [Fact]
+    public void A_reply_with_nothing_to_read_leaves_an_empty_reader_alone()
+    {
+        _announce = false;
+        var response = Reply("~~~\ncode\n~~~");
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Equal("", _session.Source);
+        Assert.Empty(_replaced);
+    }
+
+    [Fact]
     public async Task A_reply_is_read_once_a_file_has_finished()
     {
         ReadFile(Write("a.md", "One."));

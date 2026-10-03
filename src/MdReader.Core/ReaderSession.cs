@@ -175,9 +175,16 @@ public sealed class ReaderSession(
         if (!voiceReady()) return "Skipped: the voice is not ready.";
         if (_diff is not null) return "Skipped: a walkthrough is showing.";
 
+        // A document that was loaded but not played (opened without the voice) is unread, not free.
+        // After a document finishes, CurrentIndex is the sentence count.
+        var unread = Source != ReplySource && queue.Count > 0 && queue.CurrentIndex < queue.Count;
         var busy = queue.State != ReadingState.Idle;
-        if (busy && Source != ReplySource) return "Skipped: something else is being read.";
+        if ((busy || unread) && Source != ReplySource) return "Skipped: something else is being read.";
         if (busy && mode == ReplyMode.Finish) return "Skipped: a reply is still being read.";
+
+        // Parse before touching anything so a reply with nothing to read leaves the reader alone.
+        if (new MarkdownDocument(announceCodeBlocks()).Append(text).Sentences.Count == 0)
+            return "Skipped: there is nothing to read in the reply.";
 
         if (busy && mode == ReplyMode.Queue)
         {
