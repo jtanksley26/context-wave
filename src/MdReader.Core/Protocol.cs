@@ -11,6 +11,9 @@ public sealed record PipeRequest
     public string? Path { get; init; }
     public string? Text { get; init; }
     public string? Mode { get; init; }
+    public string? Diff { get; init; }
+    public string? Title { get; init; }
+    public string? Focus { get; init; }
 }
 
 public sealed record PipeResult
@@ -20,6 +23,7 @@ public sealed record PipeResult
     public string? Source { get; init; }
     public int? CurrentSentence { get; init; }
     public int? TotalSentences { get; init; }
+    public int? DiffFiles { get; init; }
 }
 
 public sealed record PipeResponse

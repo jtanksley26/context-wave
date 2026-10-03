@@ -29,6 +29,27 @@ public class PipeTests
     }
 
     [Fact]
+    public async Task Diff_fields_round_trip()
+    {
+        var name = NewName();
+        PipeRequest? seen = null;
+        using var server = new PipeServer(name, request =>
+        {
+            seen = request;
+            return Task.FromResult(PipeResponse.Success(new PipeResult { Message = "ok", DiffFiles = 2 }));
+        });
+        server.Start();
+
+        var response = await PipeClient.SendAsync(
+            name,
+            new PipeRequest { Op = "show_diff", Diff = SampleDiff.Many, Title = "PR 12", Focus = "src/Foo.cs:2-4" },
+            2000);
+
+        Assert.Equal(2, response.Result!.DiffFiles);
+        Assert.Equal((SampleDiff.Many, "PR 12", "src/Foo.cs:2-4"), (seen!.Diff, seen.Title, seen.Focus));
+    }
+
+    [Fact]
     public async Task Server_handles_several_requests_in_a_row()
     {
         var name = NewName();
