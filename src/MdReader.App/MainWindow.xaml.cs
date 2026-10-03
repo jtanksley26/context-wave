@@ -151,7 +151,7 @@ public partial class MainWindow : Window
         {
             // Leave the window open so the reason can be read.
             FileLog.Write($"Startup failed: {ex}");
-            StatusText.Text = $"MD Reader could not start: {ex.Message}";
+            StatusText.Text = $"Context Wave could not start: {ex.Message}";
         }
     }
 
@@ -193,13 +193,13 @@ public partial class MainWindow : Window
     }
 
     private void UpdateTitle() => Title = _session.DiffTitle is { } title
-        ? $"{title} - MD Reader"
+        ? $"{title} - Context Wave"
         : _session.Source switch
         {
-            "" => "MD Reader",
-            "stream" => "MD Reader - from Claude",
-            ReaderSession.ReplySource => "Claude's reply - MD Reader",
-            var path => $"{Path.GetFileName(path)} - MD Reader",
+            "" => "Context Wave",
+            "stream" => "Context Wave - from Claude",
+            ReaderSession.ReplySource => "Claude's reply - Context Wave",
+            var path => $"{Path.GetFileName(path)} - Context Wave",
         };
 
     private void UpdatePosition()

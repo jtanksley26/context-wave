@@ -1,4 +1,4 @@
-# Removes MD Reader for the current user: the Claude registration, the shortcut and the app
+# Removes Context Wave for the current user: the Claude registration, the shortcut and the app
 # folder. Voices and settings are kept unless you ask for them to be removed.
 $ErrorActionPreference = 'Stop'
 
@@ -9,15 +9,17 @@ $bridge = Join-Path $target 'bridge\MdReader.Bridge.exe'
 Get-Process MdReader.App -ErrorAction SilentlyContinue | Stop-Process -Force
 
 if (Test-Path $bridge) {
-    Write-Host "Removing MD Reader from Claude..."
+    Write-Host "Removing Context Wave from Claude..."
     & $bridge setup --remove
 }
 
 Get-Process MdReader.Bridge -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 
-$shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'MD Reader.lnk'
-if (Test-Path $shortcut) { Remove-Item $shortcut -Force }
+foreach ($name in 'Context Wave.lnk', 'MD Reader.lnk') {
+    $shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) $name
+    if (Test-Path $shortcut) { Remove-Item $shortcut -Force }
+}
 
 if (Test-Path $target) {
     Set-Location $env:TEMP
@@ -33,4 +35,4 @@ if (Test-Path $data) {
     }
 }
 
-Write-Host "MD Reader has been removed."
+Write-Host "Context Wave has been removed."

@@ -1,4 +1,4 @@
-# MD Reader
+# Context Wave
 
 A Windows app that reads markdown aloud with a local neural voice and highlights the
 sentence being spoken. Claude Code and the Claude desktop app can send it files or
@@ -12,7 +12,7 @@ Requires the .NET SDK (9 or later) and the .NET 8 desktop runtime.
 dotnet build MdReader.sln
 ```
 
-The app and the MCP bridge are written to `out/`. Close MD Reader before rebuilding.
+The app and the MCP bridge are written to `out/`. Close Context Wave before rebuilding.
 Once the bridge is registered, Claude Code and the Claude desktop app keep `out\MdReader.Bridge.exe` open, so close those sessions too before rebuilding.
 
 To build and test while those are open, send the output somewhere else:
@@ -64,7 +64,7 @@ scrolls it to the lines being talked about. Clicking a diff line jumps to its ex
 
 ## Reading Claude's replies
 
-`setup` also installs a Claude Code hook that passes each finished reply to MD Reader. Choose
+`setup` also installs a Claude Code hook that passes each finished reply to Context Wave. Choose
 what happens under **Settings > Claude's replies**:
 
 - **Off** (the default): replies are not read.
@@ -73,7 +73,7 @@ what happens under **Settings > Claude's replies**:
 - **Finish the current one**: a new reply is ignored while one is being read.
 
 A reply never interrupts a file, text Claude was asked to speak, or a diff walkthrough, and
-nothing is read unless MD Reader is already open. The hook applies to Claude Code sessions
+nothing is read unless Context Wave is already open. The hook applies to Claude Code sessions
 (the terminal and the desktop app's Code tab) started after `setup` was run.
 
 ## Environment

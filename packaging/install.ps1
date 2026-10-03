@@ -1,4 +1,4 @@
-# Installs MD Reader for the current user: copies the app, the bundled voice and default
+# Installs Context Wave for the current user: copies the app, the bundled voice and default
 # settings, adds a Start Menu shortcut, and optionally connects it to Claude.
 param(
     # Skip the question and do not register with Claude.
@@ -17,7 +17,7 @@ if (-not (Test-Path (Join-Path $source 'MdReader.App.exe'))) {
     throw "The 'app' folder is missing. Extract the whole zip before running Install.cmd."
 }
 
-Write-Host "Installing MD Reader to $target"
+Write-Host "Installing Context Wave to $target"
 
 # A running copy keeps its files locked.
 Get-Process MdReader.App, MdReader.Bridge -ErrorAction SilentlyContinue | Stop-Process -Force
@@ -55,30 +55,34 @@ if ((Test-Path $defaults) -and -not (Test-Path $settings)) {
     Write-Host "Installed default settings."
 }
 
-$shortcut = Join-Path ([Environment]::GetFolderPath('Programs')) 'MD Reader.lnk'
+$programs = [Environment]::GetFolderPath('Programs')
+# The app was called MD Reader before; replace a shortcut left by an earlier install.
+$oldShortcut = Join-Path $programs 'MD Reader.lnk'
+if (Test-Path $oldShortcut) { Remove-Item $oldShortcut -Force }
+$shortcut = Join-Path $programs 'Context Wave.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut($shortcut)
 $link.TargetPath = Join-Path $target 'MdReader.App.exe'
 $link.WorkingDirectory = $target
 $link.Description = 'Reads markdown aloud'
 $link.Save()
-Write-Host "Added a Start Menu shortcut: MD Reader"
+Write-Host "Added a Start Menu shortcut: Context Wave"
 
 # The app shows its pages in the Edge WebView2 runtime, which Windows 11 includes.
 $webView = 'SOFTWARE\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}'
 $hasWebView = @("HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}",
                 "HKLM:\$webView", "HKCU:\$webView") | Where-Object { Test-Path $_ }
 if (-not $hasWebView) {
-    Write-Warning "The Microsoft Edge WebView2 Runtime was not found. MD Reader needs it:"
+    Write-Warning "The Microsoft Edge WebView2 Runtime was not found. Context Wave needs it:"
     Write-Warning "https://developer.microsoft.com/microsoft-edge/webview2/"
 }
 
 $connect = $Claude
 if (-not $Claude -and -not $NoClaude) {
     Write-Host ""
-    Write-Host "MD Reader can register itself with Claude Code and the Claude desktop app on this PC."
-    Write-Host "That adds the md-reader tools and the hook that passes Claude's replies to MD Reader."
-    $answer = Read-Host "Connect MD Reader to Claude now? [Y/n]"
+    Write-Host "Context Wave can register itself with Claude Code and the Claude desktop app on this PC."
+    Write-Host "That adds the md-reader tools and the hook that passes Claude's replies to Context Wave."
+    $answer = Read-Host "Connect Context Wave to Claude now? [Y/n]"
     $connect = $answer -notmatch '^\s*n'
 }
 if ($connect) {
@@ -92,5 +96,5 @@ else {
 }
 
 Write-Host ""
-Write-Host "MD Reader is installed. Start it from the Start Menu."
+Write-Host "Context Wave is installed. Start it from the Start Menu."
 Write-Host "To remove it, run Uninstall.cmd in $target"

@@ -5,7 +5,7 @@ namespace MdReader.Bridge;
 
 /// <summary>
 /// The command Claude Code runs when a reply ends ("MdReader.Bridge.exe reply-hook"). It forwards
-/// the reply to a running MD Reader. A hook must never disturb Claude, so this prints nothing,
+/// the reply to a running Context Wave. A hook must never disturb Claude, so this prints nothing,
 /// swallows every failure and always returns 0.
 /// </summary>
 public static class ReplyHook

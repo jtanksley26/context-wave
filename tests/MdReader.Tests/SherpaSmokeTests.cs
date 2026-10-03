@@ -18,7 +18,7 @@ public class SherpaSmokeTests
 
         using var engine = new SherpaTtsEngine(store);
         var clip = await engine.SynthesizeAsync(
-            "Hello from MD Reader.", new VoiceSettings(VoiceCatalog.Piper.Id, 0, 1.0f), CancellationToken.None);
+            "Hello from Context Wave.", new VoiceSettings(VoiceCatalog.Piper.Id, 0, 1.0f), CancellationToken.None);
 
         Assert.True(clip.SampleRate > 0);
         Assert.True(clip.Samples.Length > clip.SampleRate / 2, "expected at least half a second of audio");

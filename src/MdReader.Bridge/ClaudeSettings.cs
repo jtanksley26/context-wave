@@ -4,14 +4,14 @@ using System.Text.Json.Nodes;
 
 namespace MdReader.Bridge;
 
-/// <summary>Adds or removes MD Reader's Stop hook in the text of Claude Code's settings.json.</summary>
+/// <summary>Adds or removes Context Wave's Stop hook in the text of Claude Code's settings.json.</summary>
 public static class ClaudeSettings
 {
     public const string HookArgument = "reply-hook";
 
     private const string BridgeExeName = "MdReader.Bridge.exe";
 
-    /// <summary>True when the settings contain MD Reader's Stop hook.</summary>
+    /// <summary>True when the settings contain Context Wave's Stop hook.</summary>
     public static bool HasHook(string? existingJson)
     {
         if (string.IsNullOrWhiteSpace(existingJson)) return false;

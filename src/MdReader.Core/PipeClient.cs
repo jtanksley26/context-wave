@@ -19,8 +19,8 @@ public static class PipeClient
 
         using var reader = new StreamReader(pipe, PipeProtocol.Utf8, false, 4096, leaveOpen: true);
         var line = await reader.ReadLineAsync(ct)
-                   ?? throw new IOException("MD Reader closed the connection without replying.");
+                   ?? throw new IOException("Context Wave closed the connection without replying.");
         return JsonSerializer.Deserialize<PipeResponse>(line, PipeProtocol.Json)
-               ?? throw new IOException("MD Reader sent an empty reply.");
+               ?? throw new IOException("Context Wave sent an empty reply.");
     }
 }

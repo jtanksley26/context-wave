@@ -1,5 +1,5 @@
-MD Reader
-=========
+Context Wave
+============
 
 Reads markdown aloud with a local voice and highlights the sentence being spoken.
 Claude Code and the Claude desktop app can send it files, text and diffs.
@@ -10,8 +10,8 @@ Install
 2. Double-click Install.cmd.
 
 It installs for your user only and needs no administrator rights. It copies the app to
-%LOCALAPPDATA%\Programs\MdReader, adds "MD Reader" to the Start Menu, and installs the
-bundled voice so nothing has to be downloaded. It then asks whether to connect MD Reader
+%LOCALAPPDATA%\Programs\MdReader, adds "Context Wave" to the Start Menu, and installs the
+bundled voice so nothing has to be downloaded. It then asks whether to connect Context Wave
 to Claude on this PC.
 
 Nothing else needs to be installed: the .NET runtime is included. The app does use the
@@ -35,7 +35,7 @@ Connect Claude later, or disconnect
     "%LOCALAPPDATA%\Programs\MdReader\bridge\MdReader.Bridge.exe" setup --remove
 
 Restart Claude afterwards. Reading Claude's replies aloud is off until you choose a mode
-under Settings > Claude's replies in MD Reader.
+under Settings > Claude's replies in Context Wave.
 
 Uninstall
 ---------

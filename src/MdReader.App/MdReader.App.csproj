@@ -5,6 +5,10 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <!-- The name and icon the user sees; the file and assembly names are unchanged. -->
+    <Product>Context Wave</Product>
+    <AssemblyTitle>Context Wave</AssemblyTitle>
+    <ApplicationIcon>../../assets/context-wave.ico</ApplicationIcon>
     <MdReaderOut Condition="'$(MdReaderOut)' == ''">..\..\out\</MdReaderOut>
     <OutputPath>$(MdReaderOut)</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

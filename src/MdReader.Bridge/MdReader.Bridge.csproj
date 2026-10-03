@@ -4,6 +4,9 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <Product>Context Wave</Product>
+    <AssemblyTitle>Context Wave bridge</AssemblyTitle>
+    <ApplicationIcon>../../assets/context-wave.ico</ApplicationIcon>
     <MdReaderOut Condition="'$(MdReaderOut)' == ''">..\..\out\</MdReaderOut>
     <OutputPath>$(MdReaderOut)</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>

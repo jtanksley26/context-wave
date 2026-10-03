@@ -11,7 +11,7 @@ public sealed class ReaderTools(AppLink link)
 {
     [McpServerTool(Name = "read_file")]
     [Description(
-        "Read a markdown or text file aloud in the MD Reader window. Replaces whatever is being read. " +
+        "Read a markdown or text file aloud in the Context Wave window. Replaces whatever is being read. " +
         "Returns as soon as reading has started; it does not wait for the reading to finish. " +
         "Use status to check progress.")]
     public Task<string> ReadFile(
@@ -21,7 +21,7 @@ public sealed class ReaderTools(AppLink link)
 
     [McpServerTool(Name = "speak")]
     [Description(
-        "Read markdown text aloud in the MD Reader window. Call it repeatedly to stream: with mode 'append' " +
+        "Read markdown text aloud in the Context Wave window. Call it repeatedly to stream: with mode 'append' " +
         "each call adds to the end of the current document and reading continues without a gap. " +
         "Send whole paragraphs, not fragments of a sentence. " +
         "During a code walkthrough (after show_diff), pass focus so the diff follows what is being said. " +
@@ -42,7 +42,7 @@ public sealed class ReaderTools(AppLink link)
 
     [McpServerTool(Name = "show_diff")]
     [Description(
-        "Show a unified diff in the MD Reader window beside the text being read. Use it when reviewing a " +
+        "Show a unified diff in the Context Wave window beside the text being read. Use it when reviewing a " +
         "pull request or walking the user through code changes: call show_diff once with the whole diff " +
         "(for example the output of 'git diff' or 'gh pr diff'), then call speak once per point, each " +
         "with a focus naming the file and lines that point is about. Replaces the current document and " +
@@ -55,12 +55,12 @@ public sealed class ReaderTools(AppLink link)
         Call(new PipeRequest { Op = "show_diff", Diff = diff, Title = title }, ct);
 
     [McpServerTool(Name = "stop")]
-    [Description("Stop reading and clear the MD Reader document and queue.")]
+    [Description("Stop reading and clear the Context Wave document and queue.")]
     public Task<string> Stop(CancellationToken ct) => Call(new PipeRequest { Op = "stop" }, ct);
 
     [McpServerTool(Name = "status")]
     [Description(
-        "Report whether MD Reader is playing, paused or idle, what it is reading, its position, and " +
+        "Report whether Context Wave is playing, paused or idle, what it is reading, its position, and " +
         "whether a diff is shown.")]
     public Task<string> Status(CancellationToken ct) => Call(new PipeRequest { Op = "status" }, ct);
 
@@ -77,7 +77,7 @@ public sealed class ReaderTools(AppLink link)
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested && !ct.IsCancellationRequested)
         {
-            throw new McpException("MD Reader is not responding.");
+            throw new McpException("Context Wave is not responding.");
         }
         catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException
                                        or TimeoutException or Win32Exception or JsonException)
@@ -85,7 +85,7 @@ public sealed class ReaderTools(AppLink link)
             throw new McpException(ex.Message);
         }
 
-        if (!response.Ok) throw new McpException(response.Error ?? "MD Reader reported an error.");
+        if (!response.Ok) throw new McpException(response.Error ?? "Context Wave reported an error.");
         var result = response.Result ?? new PipeResult();
         if (result.State is null) return result.Message;
         var status =

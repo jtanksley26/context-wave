@@ -83,7 +83,7 @@ public sealed class ReaderSession(
         }
         catch (Exception ex)
         {
-            return PipeResponse.Fail($"MD Reader could not complete the request: {ex.Message}");
+            return PipeResponse.Fail($"Context Wave could not complete the request: {ex.Message}");
         }
     }
 
@@ -294,6 +294,6 @@ public sealed class ReaderSession(
     private void RequireVoice()
     {
         if (!voiceReady())
-            throw new ReaderException("Voice not ready. Open MD Reader and download the voice first.");
+            throw new ReaderException("Voice not ready. Open Context Wave and download the voice first.");
     }
 }

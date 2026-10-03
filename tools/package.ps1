@@ -1,4 +1,4 @@
-# Builds the install package: dist\MdReader-<version>-win-x64.zip
+# Builds the install package: dist\ContextWave-<version>-win-x64.zip
 #
 #   pwsh tools\package.ps1
 #   pwsh tools\package.ps1 -Version 1.2 -Voice kokoro-en-v0_19
@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $root = Split-Path $PSScriptRoot
-$name = "MdReader-$Version-win-x64"
+$name = "ContextWave-$Version-win-x64"
 $stage = Join-Path $root "dist\$name"
 $zip = "$stage.zip"
 

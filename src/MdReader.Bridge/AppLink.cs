@@ -39,7 +39,7 @@ public sealed class AppLink(string pipeName, Func<bool> launchApp, TimeSpan star
 
             if (!launchApp())
                 throw new InvalidOperationException(
-                    "MD Reader is not running and MdReader.App.exe was not found next to the bridge.");
+                    "Context Wave is not running and MdReader.App.exe was not found next to the bridge.");
 
             var elapsed = Stopwatch.StartNew();
             while (elapsed.Elapsed < startupBudget)
@@ -53,7 +53,7 @@ public sealed class AppLink(string pipeName, Func<bool> launchApp, TimeSpan star
                 }
             }
             throw new InvalidOperationException(
-                $"MD Reader did not start within {startupBudget.TotalSeconds:0} seconds.");
+                $"Context Wave did not start within {startupBudget.TotalSeconds:0} seconds.");
         }
         finally
         {

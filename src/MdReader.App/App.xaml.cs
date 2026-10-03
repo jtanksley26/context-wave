@@ -45,10 +45,10 @@ public partial class App : Application
         catch (WebView2RuntimeNotFoundException)
         {
             MessageBox.Show(
-                "MD Reader needs the Microsoft Edge WebView2 Runtime.\n\n" +
+                "Context Wave needs the Microsoft Edge WebView2 Runtime.\n\n" +
                 "Download it from https://developer.microsoft.com/microsoft-edge/webview2/ " +
-                "and start MD Reader again.",
-                "MD Reader", MessageBoxButton.OK, MessageBoxImage.Warning);
+                "and start Context Wave again.",
+                "Context Wave", MessageBoxButton.OK, MessageBoxImage.Warning);
             Shutdown();
             return;
         }
