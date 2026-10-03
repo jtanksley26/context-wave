@@ -195,6 +195,13 @@ All diff text is HTML-escaped. The page's content security policy is unchanged.
 - `ReaderSession.DiffTitle` exposes the title for the window caption.
 - A file with no hunks is kept when it came from a `diff --git` header (pure rename,
   mode change, empty new file) and shown as a header only.
+- `Parse` rejects text only when it recognises no file at all, so a diff that holds
+  nothing but a rename or a mode change is accepted.
+- Paths that git writes in quotes (non-ASCII or special characters) are decoded.
+- A focus path longer than the one in the diff also matches, so an absolute path such as
+  `C:\repo\src\Foo.cs:12` resolves to `src/Foo.cs`; when several files match that way the
+  longest path wins. Spaces around the colon and the dash are allowed.
+- A focus label is added only when the chunk produced at least one sentence.
 - The App and Bridge output folder can be overridden with the `MdReaderOut` build
   property, so the code can be built and tested while a Claude session holds the bridge
   in `out/` open.
