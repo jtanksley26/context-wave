@@ -48,7 +48,8 @@ public sealed class DocumentView(WebView2 webView)
           #diffTitle { padding:8px 10px; font:600 14px "Segoe UI",sans-serif; }
           #diffTitle:empty { display:none; }
           .df { min-width:max-content; margin-bottom:18px; }
-          .dfh { position:sticky; top:0; padding:6px 10px; font-weight:600; cursor:pointer;
+          /* z-index: the dimmed line numbers below would otherwise paint over the stuck header. */
+          .dfh { position:sticky; top:0; z-index:1; padding:6px 10px; font-weight:600; cursor:pointer;
                  background:var(--code); border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
           .dfk { font-weight:400; opacity:.7; margin-right:8px; }
           .dbin { padding:6px 10px; opacity:.7; }
@@ -111,8 +112,9 @@ public sealed class DocumentView(WebView2 webView)
             clearDiffFocus();
             let target = null;
             if (first === null) {
-              target = diffBody.querySelector('[data-file="' + file + '"] .dfh');
-              if (target) target.classList.add('focused');
+              // Scroll to the section: a sticky header reports where it is stuck, not where the file starts.
+              target = diffBody.querySelector('[data-file="' + file + '"]');
+              if (target) target.querySelector('.dfh').classList.add('focused');
             } else {
               for (let i = first; i <= last; i++) {
                 const row = diffBody.querySelector('.dl[data-line="' + i + '"]');

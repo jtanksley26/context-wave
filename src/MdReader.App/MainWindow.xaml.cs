@@ -191,7 +191,9 @@ public partial class MainWindow : Window
         if (WindowState != WindowState.Normal || Width >= DiffWindowWidth) return;
         var area = SystemParameters.WorkArea;
         Width = Math.Min(DiffWindowWidth, area.Width);
-        if (Left + Width > area.Right) Left = Math.Max(area.Left, area.Right - Width);
+        // WorkArea is the primary monitor; only pull the window back when it is on that monitor.
+        var onPrimary = Left >= area.Left && Left < area.Right;
+        if (onPrimary && Left + Width > area.Right) Left = Math.Max(area.Left, area.Right - Width);
     }
 
     private void UpdateBanner()
