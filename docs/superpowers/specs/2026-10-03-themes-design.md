@@ -71,7 +71,7 @@ dark shade; High contrast uses the contrast shade.
 
 | Colour | Light: fill / bar | Dark: fill / bar | Contrast: fill and bar |
 |---|---|---|---|
-| Yellow | `#fff3a3` / `#bf8700` | `#5c4b00` / `#e3b341` | `#ffff00` |
+| Yellow | `#fff3a3` / `#9a6700` | `#5c4b00` / `#e3b341` | `#ffff00` |
 | Green | `#c8f0c8` / `#2e7d32` | `#1f4d2b` / `#56d364` | `#00ff66` |
 | Blue | `#cfe4ff` / `#1f6feb` | `#1b3f73` / `#79b8ff` | `#66ccff` |
 | Pink | `#ffd6e7` / `#c2185b` | `#5c2340` / `#f778ba` | `#ff80c0` |
@@ -177,6 +177,27 @@ not changed.
 - **Manual:** menu and submenus, drop-down list, slider, buttons, progress bar, banner
   and title bar in each theme; switching while reading; System following a Windows
   theme change.
+
+## Amendments (2026-10-03, from implementation planning)
+
+- `ThemeCatalog.ThemeChoices` (id and display name, System first) replaces `ThemeIds`.
+- `ResolvedTheme` holds the chosen `Theme` and `HighlightColour` plus the derived
+  `HighlightFill`, `HighlightBar`, `HighlightTint` and `HighlightText`, instead of
+  repeating every colour.
+- `ResolvedTheme.PageVariables()` in Core produces the CSS variable map so it can be
+  unit tested; `ThemeCatalog.IsSystem(id)` says whether an id follows Windows.
+- There is one more brush, `AccentBrush`, set to the highlight bar colour. The slider
+  thumb, the progress bar and pressed or focused control borders use it, so the
+  highlight choice also tints those.
+- The light yellow bar is `#9a6700`; `#bf8700` was only 2.7:1 against the Sepia page.
+- The contrast test also covers text on focused diff rows (the tint over the page,
+  added and removed colours), chrome text on the hover colour, and requires the bar to
+  be at least 3:1 against the page.
+- The test project references `MdReader.App` and WPF so that `Chrome.xaml` is loaded
+  and every control template is built in a test.
+- Scroll bars inside the voice list and menus keep the Windows default look.
+- On some Windows versions the title bar changes colour only after the window is next
+  activated.
 
 ## Out of scope
 
