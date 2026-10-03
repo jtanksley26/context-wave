@@ -7,10 +7,15 @@ public sealed class ReaderException(string message) : Exception(message);
 /// <param name="FocusProblem">Why the focus could not be linked to the diff, or null.</param>
 public sealed record SpeakResult(int Count, string? FocusProblem);
 
-public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlocks, Func<bool> voiceReady)
+public sealed class ReaderSession(
+    ReadingQueue queue, Func<bool> announceCodeBlocks, Func<bool> voiceReady, Func<string>? replyMode = null)
 {
     public const long MaxFileBytes = 5 * 1024 * 1024;
     public const int MaxDiffBytes = 2 * 1024 * 1024;
+    public const int MaxReplyChars = 200_000;
+
+    /// <summary>The <see cref="Source"/> while one of Claude's replies is the current document.</summary>
+    public const string ReplySource = "reply";
 
     private static readonly HashSet<string> Extensions =
         new(StringComparer.OrdinalIgnoreCase) { ".md", ".markdown", ".txt" };
@@ -22,7 +27,10 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
     // Sentence id -> the place in the diff its chunk was spoken about.
     private readonly Dictionary<int, DiffAnchor> _anchors = [];
 
-    /// <summary>"" when empty, "stream" for text sent by Claude, otherwise the file path.</summary>
+    /// <summary>
+    /// "" when empty, "stream" for text Claude sent with speak, "reply" for a reply read
+    /// automatically, otherwise the file path.
+    /// </summary>
     public string Source { get; private set; } = "";
 
     /// <summary>The title given with the loaded diff, or null.</summary>
@@ -54,6 +62,9 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
                 case "show_diff":
                     var files = ShowDiff(request.Diff ?? "", request.Title);
                     return PipeResponse.Success($"Showing diff: {files} {(files == 1 ? "file" : "files")}.");
+                case "speak_reply":
+                    // Always a success: a skipped reply is normal, and the hook must not see an error.
+                    return PipeResponse.Success(SpeakReply(request.Text ?? ""));
                 case "stop":
                     Stop();
                     return PipeResponse.Success("Stopped.");
@@ -120,7 +131,8 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
             else anchor = _diff.Resolve(focus, out problem);
         }
 
-        var replace = mode == "replace" || Source == "";
+        // Text Claude was asked to speak never continues a reply that was read automatically.
+        var replace = mode == "replace" || Source == "" || Source == ReplySource;
         if (replace)
         {
             _document = new MarkdownDocument(announceCodeBlocks());
@@ -147,6 +159,41 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
             queue.Append(result.Sentences, voiceReady());
         }
         return new SpeakResult(result.Sentences.Count, problem);
+    }
+
+    /// <summary>
+    /// Reads one of Claude's replies if the mode and the reader's state allow it. A file, a speak
+    /// stream or a walkthrough is never interrupted; only another reply can be replaced or queued behind.
+    /// </summary>
+    /// <returns>What happened, for the caller's log.</returns>
+    public string SpeakReply(string text)
+    {
+        var mode = ReplyMode.Normalize(replyMode?.Invoke());
+        if (mode == ReplyMode.Off) return "Skipped: reading replies is off.";
+        if (string.IsNullOrWhiteSpace(text)) return "Skipped: the reply is empty.";
+        if (text.Length > MaxReplyChars) return "Skipped: the reply is too long.";
+        if (!voiceReady()) return "Skipped: the voice is not ready.";
+        if (_diff is not null) return "Skipped: a walkthrough is showing.";
+
+        var busy = queue.State != ReadingState.Idle;
+        if (busy && Source != ReplySource) return "Skipped: something else is being read.";
+        if (busy && mode == ReplyMode.Finish) return "Skipped: a reply is still being read.";
+
+        if (busy && mode == ReplyMode.Queue)
+        {
+            var added = _document.Append(text);
+            DocumentAppended?.Invoke($"<hr>{added.Html}");
+            queue.Append(added.Sentences);
+            return $"Queued the reply ({added.Sentences.Count} sentences) after the current one.";
+        }
+
+        _document = new MarkdownDocument(announceCodeBlocks());
+        _anchors.Clear();
+        var result = _document.Append(text);
+        Source = ReplySource;
+        DocumentReplaced?.Invoke(result.Html);
+        queue.Load(result.Sentences);
+        return $"Reading the reply ({result.Sentences.Count} sentences).";
     }
 
     /// <summary>Starts a walkthrough: stops reading, clears the document and shows the diff.</summary>

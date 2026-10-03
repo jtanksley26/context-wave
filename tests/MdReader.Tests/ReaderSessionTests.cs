@@ -13,12 +13,13 @@ public sealed class ReaderSessionTests : IDisposable
     private readonly List<(string Html, string? Title)> _diffs = [];
     private bool _voiceReady = true;
     private bool _announce = true;
+    private string _replies = "switch";
 
     public ReaderSessionTests()
     {
         _queue = new ReadingQueue(
             new FakeTts(), _output, () => new VoiceSettings("m", 0, 1f), (_, _) => Task.CompletedTask);
-        _session = new ReaderSession(_queue, () => _announce, () => _voiceReady);
+        _session = new ReaderSession(_queue, () => _announce, () => _voiceReady, () => _replies);
         _session.DocumentReplaced += _replaced.Add;
         _session.DocumentAppended += _appended.Add;
         _session.DiffReplaced += (html, title) => _diffs.Add((html, title));
@@ -44,6 +45,19 @@ public sealed class ReaderSessionTests : IDisposable
 
     private PipeResponse ShowDiff(string diff, string? title = null) =>
         _session.Handle(new PipeRequest { Op = "show_diff", Diff = diff, Title = title });
+
+    private PipeResponse Reply(string text) =>
+        _session.Handle(new PipeRequest { Op = "speak_reply", Text = text });
+
+    /// <summary>Lets the sentence in progress finish and waits for the reader to go idle.</summary>
+    private async Task FinishReading()
+    {
+        await TestUtil.WaitUntil(() =>
+        {
+            _output.Release();
+            return _queue.State == ReadingState.Idle;
+        });
+    }
 
     private PipeResult Status() => _session.Handle(new PipeRequest { Op = "status" }).Result!;
 
@@ -469,5 +483,204 @@ public sealed class ReaderSessionTests : IDisposable
         Assert.Null(_session.SentenceForDiff(0, 9));
         Assert.Equal(1, _session.SentenceForDiff(0, 4));
         Assert.Equal(1, _session.SentenceForDiff(0, null));
+    }
+
+    [Theory]
+    [InlineData("switch")]
+    [InlineData("queue")]
+    [InlineData("finish")]
+    public void A_reply_is_read_when_the_reader_is_free(string mode)
+    {
+        _replies = mode;
+        var response = Reply("One. Two.");
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Equal("Reading the reply (2 sentences).", response.Result!.Message);
+        Assert.Equal("reply", _session.Source);
+        Assert.Equal(2, _queue.Count);
+        Assert.Equal(ReadingState.Playing, _queue.State);
+        Assert.Contains("data-sid", Assert.Single(_replaced));
+        Assert.Equal("reply", Status().Source);
+    }
+
+    [Theory]
+    [InlineData("off")]
+    [InlineData("loud")]
+    public void Replies_are_ignored_when_the_mode_is_off_or_unknown(string mode)
+    {
+        _replies = mode;
+        var response = Reply("One.");
+
+        Assert.True(response.Ok);
+        Assert.Contains("off", response.Result!.Message);
+        Assert.Equal(0, _queue.Count);
+        Assert.Equal("", _session.Source);
+        Assert.Empty(_replaced);
+    }
+
+    [Fact]
+    public void Switch_replaces_the_reply_being_read()
+    {
+        Reply("One.");
+        var response = Reply("Two. Three.");
+
+        Assert.Equal("Reading the reply (2 sentences).", response.Result!.Message);
+        Assert.Equal(2, _queue.Count);
+        Assert.Equal(2, _replaced.Count);
+        Assert.Empty(_appended);
+    }
+
+    [Fact]
+    public void Queue_appends_after_the_reply_being_read()
+    {
+        _replies = "queue";
+        Reply("One.");
+        var response = Reply("Two.");
+
+        Assert.Equal("Queued the reply (1 sentences) after the current one.", response.Result!.Message);
+        Assert.Equal(2, _queue.Count);
+        Assert.Single(_replaced);
+        Assert.StartsWith("<hr>", Assert.Single(_appended));
+        Assert.Contains("data-sid=\"1\"", _appended[0]);
+    }
+
+    [Fact]
+    public void Queue_appends_while_the_reply_is_paused_and_stays_paused()
+    {
+        _replies = "queue";
+        Reply("One.");
+        _queue.Pause();
+        Reply("Two.");
+
+        Assert.Equal(2, _queue.Count);
+        Assert.Equal(ReadingState.Paused, _queue.State);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Finish_ignores_a_reply_while_one_is_playing_or_paused(bool paused)
+    {
+        _replies = "finish";
+        Reply("One.");
+        if (paused) _queue.Pause();
+        var response = Reply("Two.");
+
+        Assert.True(response.Ok);
+        Assert.Contains("still being read", response.Result!.Message);
+        Assert.Equal(1, _queue.Count);
+        Assert.Single(_replaced);
+        Assert.Empty(_appended);
+    }
+
+    [Theory]
+    [InlineData("queue")]
+    [InlineData("finish")]
+    public async Task A_reply_that_has_finished_is_replaced_by_the_next(string mode)
+    {
+        _replies = mode;
+        Reply("One.");
+        await FinishReading();
+        var response = Reply("Two. Three.");
+
+        Assert.StartsWith("Reading the reply", response.Result!.Message);
+        Assert.Equal(2, _queue.Count);
+        Assert.Equal(2, _replaced.Count);
+    }
+
+    [Theory]
+    [InlineData("switch")]
+    [InlineData("queue")]
+    public void A_reply_never_interrupts_text_claude_was_asked_to_speak(string mode)
+    {
+        _replies = mode;
+        Speak("Hello there.");
+        var response = Reply("Done.");
+
+        Assert.True(response.Ok);
+        Assert.Contains("something else", response.Result!.Message);
+        Assert.Equal("stream", _session.Source);
+        Assert.Equal(1, _queue.Count);
+        Assert.Single(_replaced);
+    }
+
+    [Fact]
+    public void A_reply_never_interrupts_a_file_even_when_it_is_paused()
+    {
+        var path = Write("a.md", "One. Two.");
+        ReadFile(path);
+        _queue.Pause();
+        Reply("Done.");
+
+        Assert.Equal(path, _session.Source);
+        Assert.Equal(2, _queue.Count);
+    }
+
+    [Fact]
+    public async Task A_reply_is_read_once_a_file_has_finished()
+    {
+        ReadFile(Write("a.md", "One."));
+        await FinishReading();
+        Reply("Done.");
+
+        Assert.Equal("reply", _session.Source);
+        Assert.Equal(2, _replaced.Count);
+    }
+
+    [Fact]
+    public async Task A_reply_never_replaces_a_walkthrough_even_after_it_has_finished()
+    {
+        ShowDiff(SampleDiff.Foo);
+        Speak("About the change.", focus: "Foo.cs:2");
+        await FinishReading();
+        var response = Reply("Done.");
+
+        Assert.Contains("walkthrough", response.Result!.Message);
+        Assert.Equal("stream", _session.Source);
+        Assert.Equal(1, Status().DiffFiles);
+        Assert.Equal(1, _queue.Count);
+    }
+
+    [Fact]
+    public void A_reply_is_skipped_without_an_error_when_the_voice_is_missing()
+    {
+        _voiceReady = false;
+        var response = Reply("One.");
+
+        Assert.True(response.Ok);
+        Assert.Contains("voice", response.Result!.Message);
+        Assert.Equal(0, _queue.Count);
+    }
+
+    [Fact]
+    public void Empty_and_oversized_replies_are_skipped()
+    {
+        Assert.Contains("empty", Reply("   ").Result!.Message);
+        Assert.Contains("too long", Reply(new string('x', ReaderSession.MaxReplyChars + 1)).Result!.Message);
+        Assert.Equal(0, _queue.Count);
+        Assert.Empty(_replaced);
+    }
+
+    [Fact]
+    public void Speak_after_a_reply_starts_a_new_document_instead_of_appending()
+    {
+        Reply("One.");
+        Speak("Two.");
+
+        Assert.Equal("stream", _session.Source);
+        Assert.Equal(1, _queue.Count);
+        Assert.Equal(2, _replaced.Count);
+        Assert.Empty(_appended);
+    }
+
+    [Fact]
+    public void ReadFile_replaces_a_reply()
+    {
+        Reply("One.");
+        var path = Write("a.md", "Two. Three.");
+        Assert.True(ReadFile(path).Ok);
+
+        Assert.Equal(path, _session.Source);
+        Assert.Equal(2, _queue.Count);
     }
 }
