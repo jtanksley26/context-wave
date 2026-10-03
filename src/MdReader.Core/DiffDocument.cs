@@ -17,6 +17,12 @@ public sealed record DiffFile(
     public string DisplayPath => Kind == DiffFileKind.Deleted ? OldPath : NewPath;
 }
 
+/// <summary>
+/// A place in the diff. <see cref="FirstLine"/> and <see cref="LastLine"/> are <see cref="DiffLine.Index"/>
+/// values; both are null when the anchor is a whole file.
+/// </summary>
+public sealed record DiffAnchor(int FileIndex, int? FirstLine, int? LastLine, string Label);
+
 public sealed partial class DiffDocument
 {
     private sealed class FileBuilder(bool fromGit)
@@ -35,6 +41,9 @@ public sealed partial class DiffDocument
     [GeneratedRegex(@"^@@ -(\d{1,9})(?:,(\d{1,9}))? \+(\d{1,9})(?:,(\d{1,9}))? @@")]
     private static partial Regex HunkHeader();
 
+    [GeneratedRegex(@"^(.*):(\d{1,9})(?:-(\d{1,9}))?$")]
+    private static partial Regex FocusRange();
+
     private DiffDocument(IReadOnlyList<DiffFile> files) => Files = files;
 
     public IReadOnlyList<DiffFile> Files { get; }
@@ -43,6 +52,79 @@ public sealed partial class DiffDocument
 
     /// <summary>One section per file; each line carries its <see cref="DiffLine.Index"/> as data-line.</summary>
     public string Html => _html ??= Render();
+
+    /// <summary>
+    /// Resolves "path", "path:line" or "path:start-end" (new-file line numbers). Returns null and sets
+    /// <paramref name="problem"/> when the path matches no file or more than one.
+    /// </summary>
+    public DiffAnchor? Resolve(string focus, out string? problem)
+    {
+        problem = null;
+        var path = focus.Trim();
+        int? start = null, end = null;
+        if (FocusRange().Match(path) is { Success: true } range)
+        {
+            path = range.Groups[1].Value;
+            start = int.Parse(range.Groups[2].Value);
+            end = range.Groups[3].Success ? int.Parse(range.Groups[3].Value) : start;
+            if (end < start) (start, end) = (end, start);
+        }
+
+        var matches = FindFiles(path);
+        if (matches.Count == 0)
+        {
+            problem = $"Focus '{focus}' was not found in the diff.";
+            return null;
+        }
+        if (matches.Count > 1)
+        {
+            var names = string.Join(", ", matches.Select(f => f.DisplayPath));
+            problem = $"Focus '{focus}' matches more than one file: {names}.";
+            return null;
+        }
+
+        var file = matches[0];
+        var name = file.DisplayPath[(file.DisplayPath.LastIndexOf('/') + 1)..];
+        if (start is null) return new DiffAnchor(file.Index, null, null, name);
+
+        var first = -1;
+        var last = -1;
+        for (var i = 0; i < file.Lines.Count; i++)
+        {
+            if (file.Lines[i].NewNumber is not { } number || number < start || number > end) continue;
+            if (first < 0) first = i;
+            last = i;
+        }
+        if (first < 0) return new DiffAnchor(file.Index, null, null, name);
+
+        // A changed line is shown as its removed text followed by its added text; keep them together.
+        while (first > 0 && file.Lines[first - 1].Kind == DiffLineKind.Removed) first--;
+
+        var label = start == end ? $"{name}:{start}" : $"{name}:{start}-{end}";
+        return new DiffAnchor(file.Index, file.Lines[first].Index, file.Lines[last].Index, label);
+    }
+
+    private List<DiffFile> FindFiles(string path)
+    {
+        var query = path.Trim().Replace('\\', '/');
+        if (query.StartsWith("./", StringComparison.Ordinal)) query = query[2..];
+        var found = MatchFiles(query);
+        if (found.Count == 0
+            && (query.StartsWith("a/", StringComparison.Ordinal) || query.StartsWith("b/", StringComparison.Ordinal)))
+            found = MatchFiles(query[2..]);
+        return found;
+    }
+
+    private List<DiffFile> MatchFiles(string query)
+    {
+        if (query.Length == 0) return [];
+        var exact = Files.Where(f => Named(f, p => p.Equals(query, StringComparison.OrdinalIgnoreCase))).ToList();
+        if (exact.Count > 0) return exact;
+        var tail = "/" + query;
+        return Files.Where(f => Named(f, p => p.EndsWith(tail, StringComparison.OrdinalIgnoreCase))).ToList();
+    }
+
+    private static bool Named(DiffFile file, Func<string, bool> test) => test(file.NewPath) || test(file.OldPath);
 
     /// <exception cref="ReaderException">The text is not a unified diff.</exception>
     public static DiffDocument Parse(string unifiedDiff)

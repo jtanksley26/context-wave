@@ -264,4 +264,93 @@ public class DiffDocumentTests
         Assert.Contains("<span class=\"dfk\">renamed</span>lib/Old.cs → lib/New.cs</div>", html);
         Assert.Contains("<section class=\"df\" data-file=\"4\">", html);
     }
+
+    private static DiffAnchor? Resolve(string focus, out string? problem) =>
+        DiffDocument.Parse(SampleDiff.Many).Resolve(focus, out problem);
+
+    [Fact]
+    public void Resolve_path_only_links_to_the_whole_file()
+    {
+        var anchor = Resolve("src/Foo.cs", out var problem);
+        Assert.Equal(new DiffAnchor(0, null, null, "Foo.cs"), anchor);
+        Assert.Null(problem);
+    }
+
+    [Fact]
+    public void Resolve_single_line_uses_the_new_file_number()
+    {
+        Assert.Equal(new DiffAnchor(0, 4, 4, "Foo.cs:3"), Resolve("src/Foo.cs:3", out _));
+    }
+
+    [Fact]
+    public void Resolve_range_takes_in_the_removed_lines_just_before_it()
+    {
+        // New lines 2-4 are rows 3-5; row 2 is the removed line they replace.
+        Assert.Equal(new DiffAnchor(0, 2, 5, "Foo.cs:2-4"), Resolve("src/Foo.cs:2-4", out _));
+    }
+
+    [Fact]
+    public void Resolve_range_includes_removed_lines_between_its_ends()
+    {
+        // New lines 11 and 12 are rows 8 and 10; row 9 is a removed line between them.
+        Assert.Equal(new DiffAnchor(0, 8, 10, "Foo.cs:11-12"), Resolve("src/Foo.cs:11-12", out _));
+    }
+
+    [Fact]
+    public void Resolve_accepts_a_reversed_range()
+    {
+        Assert.Equal(new DiffAnchor(0, 2, 5, "Foo.cs:2-4"), Resolve("src/Foo.cs:4-2", out _));
+    }
+
+    [Theory]
+    [InlineData("b/src/Foo.cs")]
+    [InlineData("a/src/Foo.cs")]
+    [InlineData(@"src\Foo.cs")]
+    [InlineData("./src/Foo.cs")]
+    [InlineData("SRC/foo.CS")]
+    [InlineData("  src/Foo.cs  ")]
+    public void Resolve_normalises_the_path(string focus)
+    {
+        Assert.Equal(0, Resolve(focus, out _)!.FileIndex);
+    }
+
+    [Theory]
+    [InlineData("New.cs", 4)]
+    [InlineData("lib/Old.cs", 4)]
+    [InlineData("gone.md", 2)]
+    [InlineData("img/logo.png", 3)]
+    public void Resolve_matches_the_end_of_a_path_and_old_names(string focus, int expectedFile)
+    {
+        Assert.Equal(expectedFile, Resolve(focus, out _)!.FileIndex);
+    }
+
+    [Fact]
+    public void Resolve_reports_an_ambiguous_name_with_its_candidates()
+    {
+        Assert.Null(Resolve("Foo.cs:2", out var problem));
+        Assert.Equal("Focus 'Foo.cs:2' matches more than one file: src/Foo.cs, tests/Foo.cs.", problem);
+    }
+
+    [Theory]
+    [InlineData("nope.cs")]
+    [InlineData("oo.cs")]
+    [InlineData("")]
+    [InlineData(":12")]
+    public void Resolve_reports_an_unknown_path(string focus)
+    {
+        Assert.Null(Resolve(focus, out var problem));
+        Assert.Equal($"Focus '{focus}' was not found in the diff.", problem);
+    }
+
+    [Theory]
+    [InlineData("src/Foo.cs:900-910")]
+    [InlineData("docs/gone.md:1")]
+    public void Resolve_range_outside_the_diff_falls_back_to_the_file(string focus)
+    {
+        var anchor = Resolve(focus, out var problem);
+        Assert.Null(anchor!.FirstLine);
+        Assert.Null(anchor.LastLine);
+        Assert.DoesNotContain(":", anchor.Label);
+        Assert.Null(problem);
+    }
 }
