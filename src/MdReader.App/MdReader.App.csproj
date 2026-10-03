@@ -5,7 +5,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
-    <OutputPath>..\..\out\</OutputPath>
+    <MdReaderOut Condition="'$(MdReaderOut)' == ''">..\..\out\</MdReaderOut>
+    <OutputPath>$(MdReaderOut)</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>

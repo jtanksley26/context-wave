@@ -4,7 +4,8 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <OutputPath>..\..\out\</OutputPath>
+    <MdReaderOut Condition="'$(MdReaderOut)' == ''">..\..\out\</MdReaderOut>
+    <OutputPath>$(MdReaderOut)</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
