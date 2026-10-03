@@ -129,6 +129,11 @@ reply hook and the Bridge are not changed.
   page, Ctrl+plus can reach the window both as a WPF key event and as a message from
   the page, and only one step should result.
 - The list of installed fonts is read once at startup.
+- The guard against a double step is 20 ms, short enough that holding the key still
+  repeats. A Ctrl+wheel event with no vertical movement is ignored. The window accepts
+  Ctrl+Shift with the plus key, matching the page.
+- In the split layout the document is capped at the column width and centred within the
+  text pane; Full width gives the previous behaviour of filling the pane.
 
 ## Out of scope
 

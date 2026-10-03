@@ -366,7 +366,7 @@ public partial class MainWindow : Window
         // With focus in the page, Ctrl+plus can arrive both as a key event here and as a message
         // from the page; take only the first.
         var now = Environment.TickCount64;
-        if (now - _lastSizeStep < 40) return;
+        if (now - _lastSizeStep < 20) return;
         _lastSizeStep = now;
 
         _settings.TextSize = direction == 0
@@ -378,7 +378,10 @@ public partial class MainWindow : Window
 
     private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (Keyboard.Modifiers != ModifierKeys.Control) return;
+        // Shift is allowed with the plus key only: on many keyboards "+" is typed as Shift+=.
+        var modifiers = Keyboard.Modifiers;
+        var plusWithShift = modifiers == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.OemPlus;
+        if (modifiers != ModifierKeys.Control && !plusWithShift) return;
         int? direction = e.Key switch
         {
             Key.OemPlus or Key.Add => 1,

@@ -164,6 +164,7 @@ public sealed class DocumentView(WebView2 webView)
           document.addEventListener('wheel', e => {
             if (!e.ctrlKey) return;
             e.preventDefault();
+            if (e.deltaY === 0) return; // a sideways tilt
             const now = performance.now();
             if (now - lastWheelStep < 120) return;
             lastWheelStep = now;
