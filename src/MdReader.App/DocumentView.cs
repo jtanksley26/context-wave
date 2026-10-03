@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using MdReader.Core;
 using Microsoft.Web.WebView2.Core;
@@ -36,8 +37,10 @@ public sealed class DocumentView(WebView2 webView)
 
           /* The visualiser sits flush at the top of the text pane and stays there while text scrolls. */
           #viz { position:sticky; top:0; z-index:2; height:140px; margin:-24px -32px 16px;
-                 background:var(--bg); border-bottom:1px solid var(--line); pointer-events:none; }
+                 background:var(--bg); border-bottom:1px solid var(--line); }
           #viz.off { display:none; }
+          /* In the split layout the text pane scrolls, and sticky is measured from inside its padding. */
+          body.split #viz { top:-24px; }
           #viz canvas { display:block; width:100%; height:100%; }
 
           /* Without a diff the page is the single centred column above. */
@@ -172,7 +175,7 @@ public sealed class DocumentView(WebView2 webView)
             style: 'off',
             target: { level: 0, bands: zeros(BANDS), wave: zeros(WAVE) },
             level: 0, bands: zeros(BANDS), wave: zeros(WAVE), peaks: zeros(BANDS),
-            rings: [], dots: [], trend: 0, awakeUntil: 0, raf: 0, last: 0, w: 0, h: 0
+            rings: [], dots: [], trend: 0, spin: 0, awakeUntil: 0, raf: 0, last: 0, w: 0, h: 0
           };
 
           function setVisualizer(style) {
@@ -224,6 +227,11 @@ public sealed class DocumentView(WebView2 webView)
             return current + (target - current) * (1 - Math.exp(-dt * (target > current ? up : down)));
           }
 
+          // Speech keeps most bands well above the floor; this spreads them so pitch differences show.
+          function spread(band) {
+            return Math.pow(Math.max(0, (band - 0.3) / 0.7), 1.6);
+          }
+
           function tick(now) {
             vz.raf = 0;
             if (vz.style === 'off') return;
@@ -235,7 +243,7 @@ public sealed class DocumentView(WebView2 webView)
               const t = vz.target;
               vz.level = ease(vz.level, t.level || 0, dt, 30, 6);
               for (let i = 0; i < BANDS; i++) {
-                vz.bands[i] = ease(vz.bands[i], t.bands[i] || 0, dt, 35, 8);
+                vz.bands[i] = ease(vz.bands[i], spread(t.bands[i] || 0), dt, 35, 8);
                 vz.peaks[i] = Math.max(vz.bands[i], vz.peaks[i] - dt * 0.35);
               }
               for (let i = 0; i < WAVE; i++) vz.wave[i] = ease(vz.wave[i], t.wave[i] || 0, dt, 40, 40);
@@ -260,20 +268,22 @@ public sealed class DocumentView(WebView2 webView)
               ctx.shadowBlur = 0;
             }
 
-            if (now < vz.awakeUntil) vz.raf = requestAnimationFrame(tick);
+            // Keep going until any ring has faded, so none is left frozen on the canvas.
+            if (now < vz.awakeUntil || vz.rings.length > 0) vz.raf = requestAnimationFrame(tick);
           }
 
           const styles = {
             orb(w, h, level, dt, now, look) {
-              const cx = w / 2, cy = h / 2, base = h * 0.16;
+              const cx = w / 2, cy = h / 2, base = h * 0.11;
               // A ring leaves the core each time the level jumps.
               if (level - vz.trend > 0.12 && vz.rings.length < 6) vz.rings.push({ r: base * (1 + level), a: 0.7 });
               vz.trend = ease(vz.trend, level, dt, 8, 8);
+              vz.spin += dt * (0.3 + level * 2.2);
 
               ctx.lineWidth = 1.5;
               ctx.strokeStyle = look.main;
               for (const ring of vz.rings) {
-                ring.r += dt * h * 0.9;
+                ring.r += dt * h * 0.7;
                 ring.a -= dt * 0.9;
                 ctx.globalAlpha = Math.max(0, ring.a);
                 ctx.beginPath();
@@ -282,19 +292,21 @@ public sealed class DocumentView(WebView2 webView)
               }
               vz.rings = vz.rings.filter(ring => ring.a > 0);
 
-              ctx.strokeStyle = look.dim;
-              ctx.globalAlpha = 0.22;
-              ctx.shadowBlur = 0;
-              for (const k of [0.36, 0.45]) {
-                ctx.beginPath();
-                ctx.arc(cx, cy, h * k, 0, TAU);
-                ctx.stroke();
+              // Two broken rings that turn in opposite directions, faster as the voice gets louder.
+              ctx.lineWidth = 2;
+              for (const [k, turn, alpha] of [[0.36, vz.spin, 0.75], [0.45, -vz.spin * 0.6, 0.4]]) {
+                ctx.globalAlpha = alpha;
+                for (let arc = 0; arc < 3; arc++) {
+                  const from = turn + arc * TAU / 3;
+                  ctx.beginPath();
+                  ctx.arc(cx, cy, h * k, from, from + TAU / 3 - 0.5);
+                  ctx.stroke();
+                }
               }
 
-              ctx.shadowBlur = look.glow;
               ctx.fillStyle = look.main;
               const radius = base * (0.8 + level * 1.5);
-              for (const [scale, alpha] of [[1.5, 0.18], [1.2, 0.4], [0.85, 1]]) {
+              for (const [scale, alpha] of [[1.35, 0.18], [1.15, 0.4], [0.85, 1]]) {
                 ctx.globalAlpha = alpha;
                 ctx.beginPath();
                 ctx.arc(cx, cy, radius * scale, 0, TAU);
@@ -481,7 +493,17 @@ public sealed class DocumentView(WebView2 webView)
     /// <summary>Sends one instant of sound to the visualiser.</summary>
     public void PushAudio(AudioFrame frame)
     {
-        if (_loaded) webView.CoreWebView2.PostWebMessageAsJson(frame.ToJson());
+        if (!_loaded) return;
+        try
+        {
+            webView.CoreWebView2.PostWebMessageAsJson(frame.ToJson());
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or COMException or ObjectDisposedException
+                                       or NullReferenceException)
+        {
+            // The browser process went away or the window is closing; this runs 30 times a second,
+            // so there is nothing useful to log.
+        }
     }
 
     /// <summary>Shows the diff pane with this HTML, or hides it when the HTML is empty.</summary>

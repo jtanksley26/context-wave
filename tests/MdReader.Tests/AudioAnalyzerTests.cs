@@ -143,6 +143,18 @@ public class AudioAnalyzerTests
     }
 
     [Fact]
+    public void ToJson_writes_zero_for_values_that_are_not_finite()
+    {
+        var samples = new float[Rate];
+        samples[6000] = float.NaN;
+        var json = AudioAnalyzer.Analyze(new AudioClip(samples, Rate), 6000).ToJson();
+
+        using var parsed = JsonDocument.Parse(json);
+        Assert.Equal(0, parsed.RootElement.GetProperty("level").GetDouble());
+        Assert.DoesNotContain("NaN", json);
+    }
+
+    [Fact]
     public void ToJson_is_valid_json_whatever_the_culture()
     {
         var saved = CultureInfo.CurrentCulture;

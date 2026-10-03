@@ -78,7 +78,8 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
                 samplePosition = played + _clip.SampleRate * LatencyOffsetMs / 1000;
                 return true;
             }
-            catch (Exception ex) when (ex is COMException or InvalidOperationException or ObjectDisposedException)
+            catch (Exception ex) when (ex is COMException or InvalidOperationException or ObjectDisposedException
+                                           or NullReferenceException)
             {
                 // The device went away between the state check and the read.
                 return false;

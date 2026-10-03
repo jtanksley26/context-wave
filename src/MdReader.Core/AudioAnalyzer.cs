@@ -31,7 +31,9 @@ public sealed record AudioFrame(float Level, float[] Bands, float[] Wave)
             }
         }
 
-        static string Number(float value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+        // "NaN" is not valid JSON and would make the page reject the whole message.
+        static string Number(float value) =>
+            float.IsFinite(value) ? value.ToString("0.###", CultureInfo.InvariantCulture) : "0";
     }
 }
 
