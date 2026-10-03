@@ -24,6 +24,7 @@ public sealed class ReaderTools(AppLink link)
         "Read markdown text aloud in the MD Reader window. Call it repeatedly to stream: with mode 'append' " +
         "each call adds to the end of the current document and reading continues without a gap. " +
         "Send whole paragraphs, not fragments of a sentence. " +
+        "During a code walkthrough (after show_diff), pass focus so the diff follows what is being said. " +
         "Returns as soon as the text is queued; it does not wait for it to be spoken.")]
     public Task<string> Speak(
         [Description("Markdown text to read.")] string text,
@@ -31,15 +32,36 @@ public sealed class ReaderTools(AppLink link)
             "'append' (default) adds to the current document; 'replace' interrupts the current reading " +
             "and starts a new document.")]
         string mode = "append",
+        [Description(
+            "Optional. The part of the shown diff this text is about: 'path', 'path:line' or " +
+            "'path:start-end', using the path as it appears in the diff and line numbers from the new " +
+            "version of the file. One call, one focus: start a new call when you move to another place.")]
+        string? focus = null,
         CancellationToken ct = default) =>
-        Call(new PipeRequest { Op = "speak", Text = text, Mode = mode }, ct);
+        Call(new PipeRequest { Op = "speak", Text = text, Mode = mode, Focus = focus }, ct);
+
+    [McpServerTool(Name = "show_diff")]
+    [Description(
+        "Show a unified diff in the MD Reader window beside the text being read. Use it when reviewing a " +
+        "pull request or walking the user through code changes: call show_diff once with the whole diff " +
+        "(for example the output of 'git diff' or 'gh pr diff'), then call speak once per point, each " +
+        "with a focus naming the file and lines that point is about. Replaces the current document and " +
+        "any earlier diff. Returns as soon as the diff is displayed.")]
+    public Task<string> ShowDiff(
+        [Description("Unified diff text, at most 2 MB.")] string diff,
+        [Description("Optional short title for the window, such as the pull request name.")]
+        string? title = null,
+        CancellationToken ct = default) =>
+        Call(new PipeRequest { Op = "show_diff", Diff = diff, Title = title }, ct);
 
     [McpServerTool(Name = "stop")]
     [Description("Stop reading and clear the MD Reader document and queue.")]
     public Task<string> Stop(CancellationToken ct) => Call(new PipeRequest { Op = "stop" }, ct);
 
     [McpServerTool(Name = "status")]
-    [Description("Report whether MD Reader is playing, paused or idle, what it is reading, and its position.")]
+    [Description(
+        "Report whether MD Reader is playing, paused or idle, what it is reading, its position, and " +
+        "whether a diff is shown.")]
     public Task<string> Status(CancellationToken ct) => Call(new PipeRequest { Op = "status" }, ct);
 
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(30);
@@ -65,8 +87,11 @@ public sealed class ReaderTools(AppLink link)
 
         if (!response.Ok) throw new McpException(response.Error ?? "MD Reader reported an error.");
         var result = response.Result ?? new PipeResult();
-        return result.State is null
-            ? result.Message
-            : $"state: {result.State}\nsource: {result.Source}\nsentence: {result.CurrentSentence} of {result.TotalSentences}";
+        if (result.State is null) return result.Message;
+        var status =
+            $"state: {result.State}\nsource: {result.Source}\nsentence: {result.CurrentSentence} of {result.TotalSentences}";
+        return result.DiffFiles is int files and > 0
+            ? $"{status}\ndiff: {files} {(files == 1 ? "file" : "files")}"
+            : status;
     }
 }
