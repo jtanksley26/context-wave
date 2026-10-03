@@ -1,4 +1,5 @@
 using System.IO.Pipes;
+using System.Security.Principal;
 using MdReader.Core;
 
 namespace MdReader.Tests;
@@ -106,6 +107,30 @@ public class PipeTests
         Assert.True(response.Ok);
         Assert.Equal("ping", response.Result!.Message);
     }
+
+    private static readonly SecurityIdentifier User = new("S-1-5-21-1-2-3-1001");
+    private static readonly SecurityIdentifier Other = new("S-1-5-21-1-2-3-1002");
+    private static readonly SecurityIdentifier Administrators = new("S-1-5-32-544");
+
+    [Fact]
+    public void Pipe_owned_by_the_user_is_trusted() =>
+        Assert.True(PipeOwner.IsTrusted(User, User, tokenOwner: User, userIsAdministrator: false));
+
+    [Fact]
+    public void Pipe_owned_by_Administrators_is_trusted_for_an_administrator_whose_token_owner_is_the_user() =>
+        Assert.True(PipeOwner.IsTrusted(Administrators, User, tokenOwner: User, userIsAdministrator: true));
+
+    [Fact]
+    public void Pipe_owned_by_Administrators_is_refused_for_a_user_who_is_not_an_administrator() =>
+        Assert.False(PipeOwner.IsTrusted(Administrators, User, tokenOwner: User, userIsAdministrator: false));
+
+    [Fact]
+    public void Pipe_owned_by_another_user_is_refused() =>
+        Assert.False(PipeOwner.IsTrusted(Other, User, tokenOwner: Administrators, userIsAdministrator: true));
+
+    [Fact]
+    public void Pipe_without_an_owner_is_refused() =>
+        Assert.False(PipeOwner.IsTrusted(null, User, tokenOwner: User, userIsAdministrator: true));
 
     [Fact]
     public async Task Client_times_out_when_no_server_is_listening() =>
