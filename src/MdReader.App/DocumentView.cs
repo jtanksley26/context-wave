@@ -130,13 +130,56 @@ public sealed class DocumentView(WebView2 webView)
             }
           }
           // Labels use the reading text's size and font, so a diagram is redrawn when either changes.
-          async function drawDiagram(box) {
-            const id = 'mermaid-' + ++diagramCount;
+          // A flowchart too wide for the column is tried again with tighter spacing, then with its labels wrapped
+          // tighter too, and the layout that has to shrink least is kept, so its labels stay as close to the text
+          // size as they can. Sizes are px at mermaid's 16px text and scale with the text size.
+          // Mermaid's default ELK layout ignores spacing settings and keeps every box at least 120px wide, so the
+          // tight layouts switch to dagre, which honours them.
+          const NORMAL = { wrap: 200 }; // mermaid's own layout and spacing
+          const TIGHT = { layout: 'dagre', minNodeWidth: 0, nodeSpacing: 20, rankSpacing: 25, padding: 6 };
+          const LAYOUTS = [NORMAL, { ...TIGHT, wrap: 200 }, { ...TIGHT, wrap: 140 }, { ...TIGHT, wrap: 100 }, { ...TIGHT, wrap: 70 }];
+          // One diagram at a time: mermaid.initialize applies at once but mermaid.render runs later from a queue,
+          // so overlapping draws would render with each other's settings.
+          let drawing = Promise.resolve();
+          function drawDiagram(box) {
+            const run = drawing.then(() => drawDiagramNow(box));
+            drawing = run.catch(() => {});
+            return run;
+          }
+          async function drawDiagramNow(box) {
             const css = getComputedStyle(document.documentElement);
             const font = css.getPropertyValue('--font').trim();
             const size = css.getPropertyValue('--size').trim();
-            // Mermaid wraps labels at 200px for its 16px text; keep that ratio so large text does not wrap early.
-            const wrap = Math.round(200 * (parseFloat(size) || 16) / 16);
+            const k = (parseFloat(size) || 16) / 16;
+            const room = doc.clientWidth - 24; // the box's padding
+            const layouts = FLOWCHART.test(box.dataset.source) ? LAYOUTS : [NORMAL];
+            let best = null;
+            for (const layout of layouts) {
+              const flowchart = {};
+              for (const key in layout) {
+                if (key !== 'layout') flowchart[key === 'wrap' ? 'wrappingWidth' : key] = Math.round(layout[key] * k);
+              }
+              const svg = await renderDiagram(box.dataset.source, font, size, flowchart, layout.layout);
+              if (svg === null) return false;
+              const width = parseFloat((svg.match(/viewBox="[-\d.]+ [-\d.]+ ([\d.]+)/) || [])[1]) || room;
+              const scale = Math.min(1, room / width);
+              if (!best || scale > best.scale) best = { svg, scale };
+              if (scale >= 1) break;
+            }
+            box.innerHTML = best.svg;
+            if (box.isConnected) fitDiagram(box);
+            return true;
+          }
+          // mermaid.initialize merges into the settings left by earlier calls, so every call restates the layout
+          // settings, starting from mermaid's own defaults as they were before the first call.
+          // Copied out now, as primitives, in case getConfig hands back the live settings.
+          const MERMAID_DEFAULTS = window.mermaid ? mermaid.mermaidAPI.getConfig() : {};
+          const DEFAULT_LAYOUT = MERMAID_DEFAULTS.layout;
+          const DEFAULT_FLOWCHART = Object.fromEntries(['minNodeWidth', 'nodeSpacing', 'rankSpacing', 'padding']
+            .map(key => [key, MERMAID_DEFAULTS.flowchart?.[key]]).filter(([, value]) => value !== undefined));
+          // engine is a mermaid layout name, or undefined for mermaid's default.
+          async function renderDiagram(source, font, size, flowchart, engine) {
+            const id = 'mermaid-' + ++diagramCount;
             try {
               mermaid.initialize({
                 startOnLoad: false,
@@ -144,36 +187,49 @@ public sealed class DocumentView(WebView2 webView)
                 theme: document.documentElement.style.colorScheme === 'dark' ? 'dark' : 'default',
                 fontFamily: font,
                 themeVariables: { fontFamily: font, fontSize: size },
-                flowchart: { wrappingWidth: wrap }
+                layout: engine || DEFAULT_LAYOUT,
+                flowchart: { ...DEFAULT_FLOWCHART, ...flowchart }
               });
-              const { svg } = await mermaid.render(id, box.dataset.source);
-              box.innerHTML = svg;
-              if (box.isConnected) fitDiagram(box);
-              return true;
+              return (await mermaid.render(id, source)).svg;
             } catch {
               // A failed render can leave its scratch element behind.
               document.getElementById('d' + id)?.remove();
-              return false;
+              return null;
             }
           }
           // A wide diagram shrinks to fit the column, but no further than this; past it the box scrolls.
+          // Flowcharts, in any direction, are the exception: they shrink as far as needed and never scroll.
           const MIN_DIAGRAM_SCALE = 0.75;
+          const FLOWCHART = /^\s*(?:flowchart|graph)\b/im;
           function fitDiagram(box) {
             const svg = box.querySelector('svg');
             const view = svg && svg.viewBox.baseVal;
             if (!view || !view.width) return;
             const pad = getComputedStyle(box);
             const room = box.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
-            const scale = Math.min(1, Math.max(MIN_DIAGRAM_SCALE, room / view.width));
+            const floor = FLOWCHART.test(box.dataset.source) ? 0 : MIN_DIAGRAM_SCALE;
+            const scale = Math.min(1, Math.max(floor, room / view.width));
             svg.style.maxWidth = 'none'; // mermaid's own cap would shrink it all the way
-            svg.setAttribute('width', view.width * scale);
-            svg.setAttribute('height', view.height * scale);
+            // Rounded down so a diagram scaled to the column does not overflow it by a fraction of a pixel.
+            svg.setAttribute('width', Math.floor(view.width * scale));
+            svg.setAttribute('height', Math.floor(view.height * scale));
           }
           function redrawDiagrams() {
             if (window.mermaid) doc.querySelectorAll('.diagram').forEach(drawDiagram);
           }
-          // Covers window resizes, the column width setting and the diff divider.
-          new ResizeObserver(() => doc.querySelectorAll('.diagram').forEach(fitDiagram)).observe(doc);
+          // Covers window resizes, the column width setting and the diff divider. Rescaling is immediate; a
+          // flowchart's label wrapping is chosen again once the width has settled.
+          let docWidth = 0, rewrapTimer = 0;
+          new ResizeObserver(() => {
+            doc.querySelectorAll('.diagram').forEach(fitDiagram);
+            if (doc.clientWidth === docWidth) return;
+            docWidth = doc.clientWidth;
+            clearTimeout(rewrapTimer);
+            rewrapTimer = setTimeout(() => {
+              if (!window.mermaid) return;
+              doc.querySelectorAll('.diagram').forEach(box => { if (FLOWCHART.test(box.dataset.source)) drawDiagram(box); });
+            }, 300);
+          }).observe(doc);
           function highlight(id) {
             document.querySelectorAll('.speaking').forEach(e => e.classList.remove('speaking'));
             const parts = document.querySelectorAll('[data-sid="' + id + '"]');
