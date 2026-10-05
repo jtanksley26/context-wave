@@ -8,6 +8,10 @@ public static partial class SpeechRules
     public const int ParagraphPauseMs = 250;
     public const int ListItemPauseMs = 200;
     public const string CodeBlockAnnouncement = "code block";
+    public const string DiagramAnnouncement = "diagram";
+
+    /// <summary>Fenced code in this language is drawn as a diagram in the reading pane.</summary>
+    public const string DiagramLanguage = "mermaid";
 
     [GeneratedRegex(
         @"</?(?:a|b|blockquote|br|code|details|div|em|h[1-6]|hr|i|img|kbd|li|ol|p|pre|s|script|span|strong|style|sub|summary|sup|table|tbody|td|th|thead|tr|u|ul)\b[^>]*>|<!--.*?-->",

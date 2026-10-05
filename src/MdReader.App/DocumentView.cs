@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using MdReader.Core;
@@ -33,6 +34,9 @@ public sealed class DocumentView(WebView2 webView)
           pre { background:var(--code); padding:12px; overflow:auto; border-radius:6px; }
           code { font-family:Consolas,monospace; font-size:.92em; }
           pre code[data-sid] { display:block; }
+          /* A mermaid block once it is drawn; the code is kept in data-source to redraw on a theme change. */
+          .diagram { margin:1em 0; padding:12px; text-align:center; overflow:auto; border-radius:6px; }
+          .diagram svg { max-width:100%; height:auto; }
           table { border-collapse:collapse; }
           th, td { border:1px solid var(--line); padding:4px 10px; }
           blockquote { border-left:4px solid var(--line); margin-left:0; padding-left:16px; }
@@ -97,10 +101,46 @@ public sealed class DocumentView(WebView2 webView)
             empty.style.display = html ? 'none' : '';
             window.scrollTo(0, 0);
             textPane.scrollTop = 0;
+            drawDiagrams();
           }
           function appendDoc(html) {
             doc.insertAdjacentHTML('beforeend', html);
             empty.style.display = 'none';
+            drawDiagrams();
+          }
+
+          // ---- Diagrams ----
+          // mermaid is injected by the app before this page loads; without it the blocks stay as code.
+          let diagramCount = 0;
+          function drawDiagrams() {
+            if (!window.mermaid) return;
+            for (const code of doc.querySelectorAll('pre > code[class~="language-mermaid" i]')) {
+              const box = document.createElement('div');
+              box.className = 'diagram';
+              box.dataset.source = code.textContent;
+              if (code.dataset.sid) box.dataset.sid = code.dataset.sid;
+              const pre = code.parentElement;
+              // Swap the block out only once it has drawn, so a bad diagram is still shown as code.
+              drawDiagram(box).then(ok => { if (ok && pre.isConnected) pre.replaceWith(box); });
+              code.removeAttribute('class'); // so a later append does not draw it again
+            }
+          }
+          async function drawDiagram(box) {
+            const id = 'mermaid-' + ++diagramCount;
+            try {
+              mermaid.initialize({
+                startOnLoad: false,
+                securityLevel: 'strict',
+                theme: document.documentElement.style.colorScheme === 'dark' ? 'dark' : 'default'
+              });
+              const { svg } = await mermaid.render(id, box.dataset.source);
+              box.innerHTML = svg;
+              return true;
+            } catch {
+              // A failed render can leave its scratch element behind.
+              document.getElementById('d' + id)?.remove();
+              return false;
+            }
           }
           function highlight(id) {
             document.querySelectorAll('.speaking').forEach(e => e.classList.remove('speaking'));
@@ -119,7 +159,9 @@ public sealed class DocumentView(WebView2 webView)
           function setTheme(theme) {
             const root = document.documentElement;
             for (const name in theme.vars) root.style.setProperty('--' + name, theme.vars[name]);
+            const wasDark = root.style.colorScheme === 'dark';
             root.style.colorScheme = theme.dark ? 'dark' : 'light';
+            if (window.mermaid && wasDark !== theme.dark) doc.querySelectorAll('.diagram').forEach(drawDiagram);
             wake();
           }
 
@@ -492,6 +534,8 @@ public sealed class DocumentView(WebView2 webView)
             done.TrySetResult();
         }
         core.NavigationCompleted += OnCompleted;
+        // Injected rather than linked: the page's content policy allows no script sources.
+        await core.AddScriptToExecuteOnDocumentCreatedAsync(LoadMermaid());
         core.NavigateToString(ShellHtml);
         await done.Task;
 
@@ -500,6 +544,14 @@ public sealed class DocumentView(WebView2 webView)
         if (_theme is not null) SetTheme(_theme);
         if (_text is not null) SetText(_text);
         SetVisualizer(_visualizer);
+    }
+
+    private static string LoadMermaid()
+    {
+        using var stream = typeof(DocumentView).Assembly.GetManifestResourceStream("mermaid.min.js")
+            ?? throw new InvalidOperationException("The mermaid script is missing from the app.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
     }
 
     public void SetDocument(string html) => Run($"setDoc({JsonSerializer.Serialize(html)})");

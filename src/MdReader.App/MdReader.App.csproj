@@ -19,6 +19,10 @@
     <ProjectReference Include="..\MdReader.Bridge\MdReader.Bridge.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <ItemGroup>
+    <!-- Mermaid 12.1.0 (MIT, see Assets/mermaid.LICENSE), injected into the reading pane to draw diagrams. -->
+    <EmbeddedResource Include="Assets\mermaid.min.js" LogicalName="mermaid.min.js" />
+  </ItemGroup>
+  <ItemGroup>
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4258.31" />
     <PackageReference Include="NAudio" Version="2.2.1" />
   </ItemGroup>

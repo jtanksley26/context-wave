@@ -101,7 +101,10 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true)
             case CodeBlock code:
                 if (announceCodeBlocks)
                 {
-                    var sentence = new Sentence(_nextId++, SpeechRules.CodeBlockAnnouncement, SpeechRules.ParagraphPauseMs);
+                    var isDiagram = code is FencedCodeBlock fenced
+                        && SpeechRules.DiagramLanguage.Equals(fenced.Info, StringComparison.OrdinalIgnoreCase);
+                    var announcement = isDiagram ? SpeechRules.DiagramAnnouncement : SpeechRules.CodeBlockAnnouncement;
+                    var sentence = new Sentence(_nextId++, announcement, SpeechRules.ParagraphPauseMs);
                     code.GetAttributes().AddProperty("data-sid", sentence.Id.ToString());
                     added.Add(sentence);
                 }
