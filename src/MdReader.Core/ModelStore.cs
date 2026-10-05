@@ -1,5 +1,6 @@
-using System.Diagnostics;
+using System.Formats.Tar;
 using System.Security.Cryptography;
+using ICSharpCode.SharpZipLib.BZip2;
 
 namespace MdReader.Core;
 
@@ -61,18 +62,18 @@ public sealed class ModelStore(string root, HttpClient http)
         return Convert.ToHexString(sha.GetHashAndReset());
     }
 
+    // Decompressed in-process: the inbox tar.exe on Windows 10 / Server 2022 has no bzip2 support.
     private static async Task ExtractAsync(string archive, string destination, CancellationToken ct)
     {
-        var info = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "tar.exe"))
+        try
         {
-            ArgumentList = { "-xjf", archive, "-C", destination },
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            RedirectStandardError = true,
-        };
-        using var process = Process.Start(info) ?? throw new IOException("Could not start tar.exe.");
-        var error = await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
-        if (process.ExitCode != 0) throw new IOException($"Extracting the voice failed: {error.Trim()}");
+            await using var file = File.OpenRead(archive);
+            await using var bzip2 = new BZip2InputStream(file);
+            await TarFile.ExtractToDirectoryAsync(bzip2, destination, overwriteFiles: true, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new IOException($"Extracting the voice failed: {ex.Message}", ex);
+        }
     }
 }
