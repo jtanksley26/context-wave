@@ -34,9 +34,9 @@ public sealed class DocumentView(WebView2 webView)
           pre { background:var(--code); padding:12px; overflow:auto; border-radius:6px; }
           code { font-family:Consolas,monospace; font-size:.92em; }
           pre code[data-sid] { display:block; }
-          /* A mermaid block once it is drawn; the code is kept in data-source to redraw on a theme change. */
+          /* A mermaid block once it is drawn; the code is kept in data-source to redraw on a theme or text change. */
           .diagram { margin:1em 0; padding:12px; text-align:center; overflow:auto; border-radius:6px; }
-          .diagram svg { max-width:100%; height:auto; }
+          .diagram svg { vertical-align:top; }
           table { border-collapse:collapse; }
           th, td { border:1px solid var(--line); padding:4px 10px; }
           blockquote { border-left:4px solid var(--line); margin-left:0; padding-left:16px; }
@@ -121,20 +121,34 @@ public sealed class DocumentView(WebView2 webView)
               if (code.dataset.sid) box.dataset.sid = code.dataset.sid;
               const pre = code.parentElement;
               // Swap the block out only once it has drawn, so a bad diagram is still shown as code.
-              drawDiagram(box).then(ok => { if (ok && pre.isConnected) pre.replaceWith(box); });
+              drawDiagram(box).then(ok => {
+                if (!ok || !pre.isConnected) return;
+                pre.replaceWith(box);
+                fitDiagram(box);
+              });
               code.removeAttribute('class'); // so a later append does not draw it again
             }
           }
+          // Labels use the reading text's size and font, so a diagram is redrawn when either changes.
           async function drawDiagram(box) {
             const id = 'mermaid-' + ++diagramCount;
+            const css = getComputedStyle(document.documentElement);
+            const font = css.getPropertyValue('--font').trim();
+            const size = css.getPropertyValue('--size').trim();
+            // Mermaid wraps labels at 200px for its 16px text; keep that ratio so large text does not wrap early.
+            const wrap = Math.round(200 * (parseFloat(size) || 16) / 16);
             try {
               mermaid.initialize({
                 startOnLoad: false,
                 securityLevel: 'strict',
-                theme: document.documentElement.style.colorScheme === 'dark' ? 'dark' : 'default'
+                theme: document.documentElement.style.colorScheme === 'dark' ? 'dark' : 'default',
+                fontFamily: font,
+                themeVariables: { fontFamily: font, fontSize: size },
+                flowchart: { wrappingWidth: wrap }
               });
               const { svg } = await mermaid.render(id, box.dataset.source);
               box.innerHTML = svg;
+              if (box.isConnected) fitDiagram(box);
               return true;
             } catch {
               // A failed render can leave its scratch element behind.
@@ -142,6 +156,24 @@ public sealed class DocumentView(WebView2 webView)
               return false;
             }
           }
+          // A wide diagram shrinks to fit the column, but no further than this; past it the box scrolls.
+          const MIN_DIAGRAM_SCALE = 0.75;
+          function fitDiagram(box) {
+            const svg = box.querySelector('svg');
+            const view = svg && svg.viewBox.baseVal;
+            if (!view || !view.width) return;
+            const pad = getComputedStyle(box);
+            const room = box.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
+            const scale = Math.min(1, Math.max(MIN_DIAGRAM_SCALE, room / view.width));
+            svg.style.maxWidth = 'none'; // mermaid's own cap would shrink it all the way
+            svg.setAttribute('width', view.width * scale);
+            svg.setAttribute('height', view.height * scale);
+          }
+          function redrawDiagrams() {
+            if (window.mermaid) doc.querySelectorAll('.diagram').forEach(drawDiagram);
+          }
+          // Covers window resizes, the column width setting and the diff divider.
+          new ResizeObserver(() => doc.querySelectorAll('.diagram').forEach(fitDiagram)).observe(doc);
           function highlight(id) {
             document.querySelectorAll('.speaking').forEach(e => e.classList.remove('speaking'));
             const parts = document.querySelectorAll('[data-sid="' + id + '"]');
@@ -152,7 +184,9 @@ public sealed class DocumentView(WebView2 webView)
           // text.vars maps a variable name (without "--") to its value: size, font, col, lh.
           function setText(text) {
             const root = document.documentElement;
+            const before = root.style.getPropertyValue('--size') + root.style.getPropertyValue('--font');
             for (const name in text.vars) root.style.setProperty('--' + name, text.vars[name]);
+            if (root.style.getPropertyValue('--size') + root.style.getPropertyValue('--font') !== before) redrawDiagrams();
           }
 
           // theme.vars maps a variable name (without "--") to its value.
@@ -161,7 +195,7 @@ public sealed class DocumentView(WebView2 webView)
             for (const name in theme.vars) root.style.setProperty('--' + name, theme.vars[name]);
             const wasDark = root.style.colorScheme === 'dark';
             root.style.colorScheme = theme.dark ? 'dark' : 'light';
-            if (window.mermaid && wasDark !== theme.dark) doc.querySelectorAll('.diagram').forEach(drawDiagram);
+            if (wasDark !== theme.dark) redrawDiagrams();
             wake();
           }
 
