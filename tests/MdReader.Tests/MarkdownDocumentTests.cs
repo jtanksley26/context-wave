@@ -63,6 +63,15 @@ public class MarkdownDocumentTests
     }
 
     [Fact]
+    public void Mermaid_block_is_announced_as_a_diagram_and_keeps_its_language_class()
+    {
+        var doc = Parse("```Mermaid\nflowchart TD\n  A --> B\n```");
+        Assert.Equal(new[] { SpeechRules.DiagramAnnouncement }, Spoken(doc));
+        Assert.Contains("class=\"language-Mermaid\"", doc.Html);
+        Assert.Contains("data-sid=\"0\"", doc.Html);
+    }
+
+    [Fact]
     public void Code_block_is_silent_when_announcements_are_off() =>
         Assert.Empty(Parse("~~~\nx = 1\n~~~", announceCodeBlocks: false).Sentences);
 
