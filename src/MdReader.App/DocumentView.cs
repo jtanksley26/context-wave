@@ -37,6 +37,8 @@ public sealed class DocumentView(WebView2 webView)
           /* A mermaid block once it is drawn; the code is kept in data-source to redraw on a theme or text change. */
           .diagram { margin:1em 0; padding:12px; text-align:center; overflow:auto; border-radius:6px; }
           .diagram svg { vertical-align:top; }
+          /* Where mermaid measures a diagram as it draws it: out of the layout, so the text does not move. */
+          #scratch { position:fixed; left:0; top:0; width:100%; visibility:hidden; pointer-events:none; }
           table { border-collapse:collapse; }
           th, td { border:1px solid var(--line); padding:4px 10px; }
           blockquote { border-left:4px solid var(--line); margin-left:0; padding-left:16px; }
@@ -87,6 +89,7 @@ public sealed class DocumentView(WebView2 webView)
           <div id="doc"></div>
           <div id="empty">Open a markdown file, drop one here, or ask Claude to read to you.</div>
         </div>
+        <div id="scratch"></div>
         <script>
           const doc = document.getElementById('doc');
           const empty = document.getElementById('empty');
@@ -94,6 +97,7 @@ public sealed class DocumentView(WebView2 webView)
           const diffPane = document.getElementById('diff');
           const diffTitle = document.getElementById('diffTitle');
           const diffBody = document.getElementById('diffBody');
+          const scratch = document.getElementById('scratch');
           const divider = document.getElementById('divider');
 
           function setDoc(html) {
@@ -123,6 +127,8 @@ public sealed class DocumentView(WebView2 webView)
               // Swap the block out only once it has drawn, so a bad diagram is still shown as code.
               drawDiagram(box).then(ok => {
                 if (!ok || !pre.isConnected) return;
+                // The block may have started being read aloud while it was drawn.
+                box.classList.toggle('speaking', code.classList.contains('speaking'));
                 pre.replaceWith(box);
                 fitDiagram(box);
               });
@@ -140,9 +146,17 @@ public sealed class DocumentView(WebView2 webView)
           const LAYOUTS = [NORMAL, { ...TIGHT, wrap: 200 }, { ...TIGHT, wrap: 140 }, { ...TIGHT, wrap: 100 }, { ...TIGHT, wrap: 70 }];
           // One diagram at a time: mermaid.initialize applies at once but mermaid.render runs later from a queue,
           // so overlapping draws would render with each other's settings.
+          // A draw reads the text settings and width when it starts, so one that is still waiting already covers
+          // any change made since it was asked for, and is not queued again.
           let drawing = Promise.resolve();
+          const waiting = new WeakMap();
           function drawDiagram(box) {
-            const run = drawing.then(() => drawDiagramNow(box));
+            if (waiting.has(box)) return waiting.get(box);
+            const run = drawing.then(() => {
+              waiting.delete(box);
+              return drawDiagramNow(box);
+            });
+            waiting.set(box, run);
             drawing = run.catch(() => {});
             return run;
           }
@@ -190,7 +204,9 @@ public sealed class DocumentView(WebView2 webView)
                 layout: engine || DEFAULT_LAYOUT,
                 flowchart: { ...DEFAULT_FLOWCHART, ...flowchart }
               });
-              return (await mermaid.render(id, source)).svg;
+              // Drawn in #scratch: mermaid would otherwise add its scratch element to the body, which in the
+              // split layout squeezes the text pane, and the width change would start another draw.
+              return (await mermaid.render(id, source, scratch)).svg;
             } catch {
               // A failed render can leave its scratch element behind.
               document.getElementById('d' + id)?.remove();
@@ -200,7 +216,8 @@ public sealed class DocumentView(WebView2 webView)
           // A wide diagram shrinks to fit the column, but no further than this; past it the box scrolls.
           // Flowcharts, in any direction, are the exception: they shrink as far as needed and never scroll.
           const MIN_DIAGRAM_SCALE = 0.75;
-          const FLOWCHART = /^\s*(?:flowchart|graph)\b/im;
+          // The diagram type is the first word after any front matter, directives and comments.
+          const FLOWCHART = /^(?:\s*---\s*\n[\s\S]*?\n\s*---\s*\n)?(?:\s*%%\{[\s\S]*?\}%%|\s*%%[^\n]*)*\s*(?:flowchart|graph)\b/i;
           function fitDiagram(box) {
             const svg = box.querySelector('svg');
             const view = svg && svg.viewBox.baseVal;
