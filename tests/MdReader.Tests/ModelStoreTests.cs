@@ -1,6 +1,7 @@
-using System.Diagnostics;
+using System.Formats.Tar;
 using System.Net;
 using System.Security.Cryptography;
+using ICSharpCode.SharpZipLib.BZip2;
 using MdReader.Core;
 
 namespace MdReader.Tests;
@@ -30,17 +31,12 @@ public sealed class ModelStoreTests : IDisposable
         Directory.CreateDirectory(source);
         File.WriteAllText(Path.Combine(source, "model.onnx"), "not a real model");
 
-        var archivePath = Path.Combine(_dir, "fake-voice.tar.bz2");
-        var tar = Process.Start(new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "tar.exe"))
+        using (var buffer = new MemoryStream())
         {
-            ArgumentList = { "-cjf", archivePath, "-C", Path.Combine(_dir, "src"), "fake-voice" },
-            UseShellExecute = false,
-            CreateNoWindow = true,
-        })!;
-        tar.WaitForExit();
-        Assert.Equal(0, tar.ExitCode);
-
-        _archive = File.ReadAllBytes(archivePath);
+            using (var bzip2 = new BZip2OutputStream(buffer) { IsStreamOwner = false })
+                TarFile.CreateFromDirectory(source, bzip2, includeBaseDirectory: true);
+            _archive = buffer.ToArray();
+        }
         _hash = Convert.ToHexString(SHA256.HashData(_archive));
     }
 
