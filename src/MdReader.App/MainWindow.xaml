@@ -26,6 +26,7 @@
                           IsCheckable="True" Click="OnAnnounceClick" />
                 <Separator />
                 <MenuItem x:Name="RepliesMenu" Header="Claude's _replies" />
+                <MenuItem x:Name="FocusMenu" Header="Tab _focus" />
             </MenuItem>
         </Menu>
 
@@ -39,6 +40,16 @@
                 <TextBlock x:Name="DownloadText" VerticalAlignment="Center" TextWrapping="Wrap"
                            Foreground="{DynamicResource BannerTextBrush}" />
             </DockPanel>
+        </Border>
+
+        <!-- One tab per chat (and per file opened); filled in by code. Hidden while there are none. -->
+        <Border x:Name="TabStrip" DockPanel.Dock="Top" Visibility="Collapsed" BorderThickness="0,0,0,1"
+                Background="{DynamicResource ChromeBrush}"
+                BorderBrush="{DynamicResource ControlBorderBrush}"
+                TextElement.Foreground="{DynamicResource ChromeTextBrush}">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <StackPanel x:Name="TabPanel" Orientation="Horizontal" Margin="6,4,6,0" />
+            </ScrollViewer>
         </Border>
 
         <Border DockPanel.Dock="Bottom" Padding="10" BorderThickness="0,1,0,0"

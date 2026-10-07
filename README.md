@@ -76,6 +76,37 @@ A reply never interrupts a file, text Claude was asked to speak, or a diff walkt
 nothing is read unless Context Wave is already open. The hook applies to Claude Code sessions
 (the terminal and the desktop app's Code tab) started after `setup` was run.
 
+## One tab per chat
+
+Each Claude Code chat gets its own tab, named after the chat's folder, and every reply is added
+to the end of its chat's tab, so a tab is that chat's running record. Files you open get a tab of
+their own. Close a tab with its × or a middle click.
+
+There is one voice, and it reads the tab in front. Choosing another tab stops reading where it
+was; Play carries on from there. Two settings decide what happens when a reply arrives:
+
+**Settings > Claude's replies**: how the tab in front reads a new reply.
+
+- **Off**: replies are still added to their tabs (with a dot), but nothing is read aloud by itself.
+- **Read the newest right away**: a new reply interrupts and is read at once.
+- **Read after the current one**: a new reply is read when the current one finishes.
+
+**Settings > Tab focus**: whether another chat's reply brings its tab forward.
+
+- **Stay on this tab** (the default): the reply is added to its chat's tab, which gets a dot.
+- **Move to the next chat when done**: once the tab in front has nothing left to read (including
+  replies that arrived in it meanwhile), the chats with unread replies come forward one after
+  another, in the order their replies arrived. Each is read from its first unread reply to the end,
+  never from halfway.
+- **Jump to the newest**: the chat that replied comes forward at once and its new reply is read.
+
+With replies off, focus never moves by itself either.
+
+The reply hook sends the chat's session id and the processes above it; each chat's tool calls send
+the chat's process. That is how a tool call from a chat (`read_file`, `speak`, `show_diff`) lands
+in that chat's tab and brings it forward. A request that carries neither, from an older bridge,
+goes to the tab in front, or to a "Claude" tab.
+
 ## Environment
 
 Setting `MDREADER_HOME` changes where settings, logs and voices are stored (the

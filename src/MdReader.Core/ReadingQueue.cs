@@ -26,6 +26,8 @@ public sealed class ReadingQueue
     // single-sentence appends still count towards one streak.
     private int _failStreak;
     private int _failStreakStart;
+    // Reading stops before this index: sentences appended with holdBack wait for Play or a jump.
+    private int? _holdAt;
 
     public ReadingQueue(
         ITtsEngine tts,
@@ -49,6 +51,18 @@ public sealed class ReadingQueue
     public int CurrentIndex { get { lock (_gate) return _index; } }
     public int Count { get { lock (_gate) return _sentences.Count; } }
 
+    /// <summary>The id of the sentence at a position, or null when there is none.</summary>
+    public int? SentenceIdAt(int index)
+    {
+        lock (_gate) return index >= 0 && index < _sentences.Count ? _sentences[index].Id : null;
+    }
+
+    /// <summary>The id of the sentence reading is at or would resume from, or null past the end.</summary>
+    public int? CurrentSentenceId
+    {
+        get { lock (_gate) return _index < _sentences.Count ? _sentences[_index].Id : null; }
+    }
+
     public void Load(IReadOnlyList<Sentence> sentences, bool autoPlay = true)
     {
         lock (_gate)
@@ -60,14 +74,25 @@ public sealed class ReadingQueue
         RaiseState();
     }
 
-    public void Append(IReadOnlyList<Sentence> sentences, bool autoPlay = true)
+    /// <param name="holdBack">
+    /// Add the sentences without reading them: reading in progress stops before them, and they
+    /// are read on Play or when one of them is jumped to.
+    /// </param>
+    public void Append(IReadOnlyList<Sentence> sentences, bool autoPlay = true, bool holdBack = false)
     {
         if (sentences.Count == 0) return;
         lock (_gate)
         {
             var firstNew = _sentences.Count;
             _sentences.AddRange(sentences);
-            if (autoPlay && _state == ReadingState.Idle) StartLocked(firstNew);
+            if (holdBack)
+            {
+                if (_state != ReadingState.Idle) _holdAt ??= firstNew;
+            }
+            else if (autoPlay && _state == ReadingState.Idle)
+            {
+                StartLocked(firstNew);
+            }
         }
         RaiseState();
     }
@@ -124,6 +149,19 @@ public sealed class ReadingQueue
     public void Stop()
     {
         lock (_gate) ResetLocked();
+        RaiseState();
+    }
+
+    /// <summary>Stops reading but keeps the sentences and the place; Play resumes from that sentence.</summary>
+    public void Halt()
+    {
+        lock (_gate)
+        {
+            if (_state == ReadingState.Idle) return;
+            CancelRunLocked();
+            _holdAt = null;
+            _state = ReadingState.Idle;
+        }
         RaiseState();
     }
 
@@ -197,6 +235,7 @@ public sealed class ReadingQueue
         _index = 0;
         _failStreak = 0;
         _failStreakStart = 0;
+        _holdAt = null;
         _state = ReadingState.Idle;
     }
 
@@ -223,6 +262,8 @@ public sealed class ReadingQueue
     {
         CancelRunLocked();
         DropStaleClipsLocked(index);
+        // A deliberate start (Play, a jump, a move) reads on through anything that was held back.
+        _holdAt = null;
         _runCts = new CancellationTokenSource();
         var ct = _runCts.Token;
         _index = index;
@@ -292,9 +333,10 @@ public sealed class ReadingQueue
             lock (_gate)
             {
                 if (ct.IsCancellationRequested) return;
-                if (i >= _sentences.Count)
+                if (i >= _sentences.Count || i >= _holdAt)
                 {
-                    _index = _sentences.Count;
+                    _index = Math.Min(i, _sentences.Count);
+                    _holdAt = null;
                     _state = ReadingState.Idle;
                     _runCts = null;
                 }

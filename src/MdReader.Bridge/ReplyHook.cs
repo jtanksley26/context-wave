@@ -18,13 +18,19 @@ public static class ReplyHook
     private const int TranscriptTailBytes = 2 * 1024 * 1024;
 
     /// <summary>What a Stop event carried. Fields is the list of property names, for the log.</summary>
-    private sealed record StopEvent(string? Message, string? TranscriptPath, string Fields);
+    private sealed record StopEvent(
+        string? Message, string? TranscriptPath, string? SessionId, string? Folder, string Fields);
 
     public static Task<int> RunAsync(TextReader input, Func<PipeRequest, Task<PipeResponse>> send) =>
-        RunAsync(input, send, transcriptAttempts: 6, transcriptDelayMs: 300);
+        RunAsync(input, send, transcriptAttempts: 6, transcriptDelayMs: 300, ProcessIdentity.AncestorKeys);
 
+    /// <param name="processes">
+    /// The processes above the hook. One is the chat's own, which is also the parent of the chat's
+    /// tool bridge; Context Wave uses it to send the chat's tool calls to the same tab.
+    /// </param>
     public static async Task<int> RunAsync(
-        TextReader input, Func<PipeRequest, Task<PipeResponse>> send, int transcriptAttempts, int transcriptDelayMs)
+        TextReader input, Func<PipeRequest, Task<PipeResponse>> send, int transcriptAttempts, int transcriptDelayMs,
+        Func<IReadOnlyList<string>>? processes = null)
     {
         try
         {
@@ -41,7 +47,14 @@ public static class ReplyHook
                 FileLog.Write($"reply-hook: no reply text in the Stop event or its transcript (fields: {stop.Fields}).");
                 return 0;
             }
-            var response = await send(new PipeRequest { Op = "speak_reply", Text = reply });
+            var response = await send(new PipeRequest
+            {
+                Op = "speak_reply",
+                Text = reply,
+                Session = stop.SessionId,
+                Folder = stop.Folder,
+                Processes = processes?.Invoke(),
+            });
             // A skipped reply is a success to the hook, so the app's own explanation is the only trace of why.
             FileLog.Write($"reply-hook: {(response.Ok ? response.Result?.Message : response.Error)}");
         }
@@ -75,6 +88,8 @@ public static class ReplyHook
             return new StopEvent(
                 Text(root, "last_assistant_message"),
                 Text(root, "transcript_path"),
+                Text(root, "session_id"),
+                Text(root, "cwd"),
                 string.Join(", ", root.EnumerateObject().Select(p => p.Name)));
         }
         catch (JsonException)

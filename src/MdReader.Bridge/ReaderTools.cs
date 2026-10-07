@@ -66,11 +66,17 @@ public sealed class ReaderTools(AppLink link)
 
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(30);
 
+    // Claude Code starts one bridge per chat, as a direct child of that chat's process, so the
+    // parent identifies the chat. Found once: it does not change while the bridge runs.
+    private static readonly Lazy<string?> ChatProcess = new(ProcessIdentity.ParentKey);
+
     private async Task<string> Call(PipeRequest request, CancellationToken ct)
     {
         PipeResponse response;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(ReplyTimeout);
+        // Tells Context Wave which chat's tab the call belongs to.
+        request = request with { Process = ChatProcess.Value, Folder = Environment.CurrentDirectory };
         try
         {
             response = await link.SendAsync(request, timeout.Token);

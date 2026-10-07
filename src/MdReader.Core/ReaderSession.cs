@@ -131,8 +131,8 @@ public sealed class ReaderSession(
             else anchor = _diff.Resolve(focus, out problem);
         }
 
-        // Text Claude was asked to speak never continues a reply that was read automatically.
-        var replace = mode == "replace" || Source == "" || Source == ReplySource;
+        // Appending to a chat's replies keeps them: a tab is the running record of that chat.
+        var replace = mode == "replace" || Source == "";
         if (replace)
         {
             _document = new MarkdownDocument(announceCodeBlocks());
@@ -155,6 +155,8 @@ public sealed class ReaderSession(
         }
         else
         {
+            // Text Claude was asked to speak is never cut off by a reply, even when it follows replies.
+            if (Source == ReplySource) Source = "stream";
             DocumentAppended?.Invoke(html);
             queue.Append(result.Sentences, voiceReady());
         }
@@ -162,45 +164,62 @@ public sealed class ReaderSession(
     }
 
     /// <summary>
-    /// Reads one of Claude's replies if the mode and the reader's state allow it. A file, a speak
-    /// stream or a walkthrough is never interrupted; only another reply can be replaced or queued behind.
+    /// Adds one of Claude's replies to the end of the document, which keeps the chat's earlier
+    /// replies, and reads it if the mode and the reader's state allow. A file, a speak stream or a
+    /// walkthrough is never interrupted: the reply waits after it. Switch jumps to the new reply,
+    /// Queue reads it after the reply being read, and Off only adds it.
     /// </summary>
+    /// <param name="hold">Add the reply without reading it, whatever the mode (a tab in the background).</param>
     /// <returns>What happened, for the caller's log.</returns>
-    public string SpeakReply(string text)
+    public string SpeakReply(string text, bool hold = false)
     {
         var mode = ReplyMode.Normalize(replyMode?.Invoke());
-        if (mode == ReplyMode.Off) return "Skipped: reading replies is off.";
-        if (string.IsNullOrWhiteSpace(text)) return "Skipped: the reply is empty.";
-        if (text.Length > MaxReplyChars) return "Skipped: the reply is too long.";
-        if (!voiceReady()) return "Skipped: the voice is not ready.";
-        if (_diff is not null) return "Skipped: a walkthrough is showing.";
+        if (ReplySkipReason(text, announceCodeBlocks()) is { } skipped) return skipped;
 
+        var busy = queue.State != ReadingState.Idle;
         // A document that was loaded but not played (opened without the voice) is unread, not free.
         // After a document finishes, CurrentIndex is the sentence count.
-        var unread = Source != ReplySource && queue.Count > 0 && queue.CurrentIndex < queue.Count;
-        var busy = queue.State != ReadingState.Idle;
-        if ((busy || unread) && Source != ReplySource) return "Skipped: something else is being read.";
-        if (busy && mode == ReplyMode.Finish) return "Skipped: a reply is still being read.";
+        var unread = queue.CurrentIndex < queue.Count;
+        var other = Source is not ("" or ReplySource) && (busy || unread);
+        string? wait = hold ? ""
+            : mode == ReplyMode.Off ? ": reading replies is off"
+            : !voiceReady() ? ": the voice is not ready"
+            : other ? ": something else is being read"
+            : null;
 
-        // Parse before touching anything so a reply with nothing to read leaves the reader alone.
-        if (new MarkdownDocument(announceCodeBlocks()).Append(text).Sentences.Count == 0)
-            return "Skipped: there is nothing to read in the reply.";
+        var first = _document.Html.Length == 0;
+        var added = _document.Append(text);
+        var count = added.Sentences.Count;
+        // Set before the document is announced, so listeners see what it now holds.
+        if (Source == "") Source = ReplySource;
+        if (first) DocumentReplaced?.Invoke(added.Html);
+        else DocumentAppended?.Invoke($"<hr>{added.Html}");
 
+        if (wait is not null)
+        {
+            queue.Append(added.Sentences, autoPlay: false, holdBack: true);
+            return $"Added the reply ({count} sentences) without reading it{wait}.";
+        }
         if (busy && mode == ReplyMode.Queue)
         {
-            var added = _document.Append(text);
-            DocumentAppended?.Invoke($"<hr>{added.Html}");
             queue.Append(added.Sentences);
-            return $"Queued the reply ({added.Sentences.Count} sentences) after the current one.";
+            return $"Queued the reply ({count} sentences) after the current one.";
         }
-
-        _document = new MarkdownDocument(announceCodeBlocks());
-        _anchors.Clear();
-        var result = _document.Append(text);
+        queue.Append(added.Sentences, autoPlay: false);
+        queue.JumpTo(added.Sentences[0].Id);
         Source = ReplySource;
-        DocumentReplaced?.Invoke(result.Html);
-        queue.Load(result.Sentences);
-        return $"Reading the reply ({result.Sentences.Count} sentences).";
+        return $"Reading the reply ({count} sentences).";
+    }
+
+    /// <summary>Why a reply would be skipped whatever the reader is doing, or null when it can be read.</summary>
+    public static string? ReplySkipReason(string text, bool announceCodeBlocks)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "Skipped: the reply is empty.";
+        if (text.Length > MaxReplyChars) return "Skipped: the reply is too long.";
+        // Parsed on a scratch document so a reply with nothing to read leaves the reader alone.
+        if (new MarkdownDocument(announceCodeBlocks).Append(text).Sentences.Count == 0)
+            return "Skipped: there is nothing to read in the reply.";
+        return null;
     }
 
     /// <summary>Starts a walkthrough: stops reading, clears the document and shows the diff.</summary>

@@ -49,6 +49,33 @@ public class ReplyHookTests
     }
 
     [Fact]
+    public async Task Run_sends_the_chats_session_folder_and_processes_with_the_reply()
+    {
+        PipeRequest? sent = null;
+        await ReplyHook.RunAsync(new StringReader(StopMessage), request =>
+        {
+            sent = request;
+            return Task.FromResult(PipeResponse.Success("ok"));
+        }, transcriptAttempts: 1, transcriptDelayMs: 0, processes: () => ["12@34", "56@78"]);
+
+        Assert.Equal("abc123", sent!.Session);
+        Assert.Equal(@"D:\Projects\thing", sent.Folder);
+        Assert.Equal(new[] { "12@34", "56@78" }, sent.Processes);
+    }
+
+    [Fact]
+    public void ProcessIdentity_names_this_process_parent_as_its_nearest_ancestor()
+    {
+        var parent = ProcessIdentity.ParentKey();
+        var ancestors = ProcessIdentity.AncestorKeys();
+
+        Assert.NotNull(parent);
+        Assert.Equal(parent, ancestors[0]);
+        Assert.Matches(@"^\d+@\d+$", parent);
+        Assert.Equal(ProcessIdentity.KeyOf(Environment.ProcessId), ProcessIdentity.KeyOf(Environment.ProcessId));
+    }
+
+    [Fact]
     public async Task Run_sends_the_reply_as_speak_reply()
     {
         PipeRequest? sent = null;

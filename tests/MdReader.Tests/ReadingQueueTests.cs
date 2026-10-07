@@ -380,4 +380,98 @@ public class ReadingQueueTests
         Assert.Equal(2, _tts.CallCount("Sentence 0."));
         queue.Stop();
     }
+
+    [Fact]
+    public async Task Halt_stops_reading_but_keeps_the_sentences_and_the_place()
+    {
+        _output.Manual = true;
+        var queue = Create();
+        queue.Load(Make(4));
+        await TestUtil.WaitUntil(() => _output.Pending);
+        queue.Next();
+        await TestUtil.WaitUntil(() => _started.Contains(1));
+
+        queue.Halt();
+
+        Assert.Equal(ReadingState.Idle, queue.State);
+        Assert.Equal(4, queue.Count);
+        Assert.Equal(1, queue.CurrentIndex);
+        Assert.Equal(1, queue.CurrentSentenceId);
+
+        queue.Play();
+        await TestUtil.WaitUntil(() => _started.Count(id => id == 1) == 2);
+        queue.Stop();
+    }
+
+    [Fact]
+    public void Halt_releases_a_paused_output()
+    {
+        var queue = Create();
+        queue.Load(Make(2), autoPlay: false);
+        queue.Play();
+        queue.Pause();
+
+        queue.Halt();
+
+        Assert.Equal(ReadingState.Idle, queue.State);
+        Assert.True(_output.ResumeCalls > 0);
+    }
+
+    [Fact]
+    public async Task Held_sentences_are_not_read_until_Play()
+    {
+        _output.Manual = true;
+        var queue = Create();
+        queue.Load(Make(2));
+        await TestUtil.WaitUntil(() => _output.Pending);
+
+        queue.Append(Make(2, firstId: 2), holdBack: true);
+        var finished = NextFinished(queue);
+        while (!finished.IsCompleted)
+        {
+            _output.Release();
+            await Task.Delay(10);
+        }
+
+        Assert.Equal(new[] { 0, 1 }, _started);
+        Assert.Equal(2, queue.CurrentIndex);
+        Assert.Equal(2, queue.CurrentSentenceId);
+
+        _output.Manual = false;
+        var done = NextFinished(queue);
+        queue.Play();
+        await done;
+        Assert.Equal(new[] { 0, 1, 2, 3 }, _started);
+    }
+
+    [Fact]
+    public void Held_sentences_on_an_idle_queue_wait_where_reading_stopped()
+    {
+        var queue = Create();
+        queue.Load(Make(2), autoPlay: false);
+
+        queue.Append(Make(1, firstId: 2), holdBack: true);
+
+        Assert.Equal(ReadingState.Idle, queue.State);
+        Assert.Equal(3, queue.Count);
+        Assert.Empty(_started);
+    }
+
+    [Fact]
+    public async Task JumpTo_reads_through_held_sentences()
+    {
+        _output.Manual = true;
+        var queue = Create();
+        queue.Load(Make(1));
+        await TestUtil.WaitUntil(() => _output.Pending);
+        queue.Append(Make(2, firstId: 1), holdBack: true);
+
+        _output.Manual = false;
+        var finished = NextFinished(queue);
+        queue.JumpTo(1);
+        await finished;
+
+        Assert.Equal(new[] { 0, 1, 2 }, _started);
+        Assert.Null(queue.CurrentSentenceId);
+    }
 }
