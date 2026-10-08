@@ -64,15 +64,51 @@ public class ReplyHookTests
     }
 
     [Fact]
-    public void ProcessIdentity_names_this_process_parent_as_its_nearest_ancestor()
+    public void ProcessIdentity_names_this_process_parent()
     {
         var parent = ProcessIdentity.ParentKey();
-        var ancestors = ProcessIdentity.AncestorKeys();
 
         Assert.NotNull(parent);
-        Assert.Equal(parent, ancestors[0]);
         Assert.Matches(@"^\d+@\d+$", parent);
         Assert.Equal(ProcessIdentity.KeyOf(Environment.ProcessId), ProcessIdentity.KeyOf(Environment.ProcessId));
+    }
+
+    // The desktop app (1) runs each chat (10, 20) and also starts a bridge of its own (2). The hook
+    // (99) runs under a shell (50) under chat 10, whose bridge is 11.
+    private static readonly Dictionary<int, (int Parent, string Exe)> DesktopProcesses = new()
+    {
+        [1] = (0, "claude.exe"),
+        [2] = (1, "MdReader.Bridge.exe"),
+        [10] = (1, "claude.exe"),
+        [11] = (10, "MdReader.Bridge.exe"),
+        [20] = (1, "claude.exe"),
+        [21] = (20, "MdReader.Bridge.exe"),
+        [50] = (10, "bash.exe"),
+        [99] = (50, "MdReader.Bridge.exe"),
+    };
+
+    [Fact]
+    public void The_chat_process_is_the_nearest_ancestor_with_a_bridge_not_the_shared_app()
+    {
+        Assert.Equal(10, ProcessIdentity.ChatProcess([50, 10, 1], DesktopProcesses, 99, "mdreader.bridge.exe"));
+    }
+
+    [Fact]
+    public void The_hook_itself_does_not_count_as_its_parent_s_bridge()
+    {
+        // Run straight from the chat, without a shell: the chat has the hook and its real bridge.
+        var processes = new Dictionary<int, (int Parent, string Exe)>(DesktopProcesses) { [99] = (10, "MdReader.Bridge.exe") };
+        Assert.Equal(10, ProcessIdentity.ChatProcess([10, 1], processes, 99, "MdReader.Bridge.exe"));
+    }
+
+    [Fact]
+    public void A_chat_without_a_bridge_is_not_mistaken_for_the_app_above_it()
+    {
+        // Chat 10's bridge is not running; the app (1) above it still has one.
+        var processes = new Dictionary<int, (int Parent, string Exe)>(DesktopProcesses);
+        processes.Remove(11);
+
+        Assert.Null(ProcessIdentity.ChatProcess([50, 10, 1], processes, 99, "MdReader.Bridge.exe"));
     }
 
     [Fact]

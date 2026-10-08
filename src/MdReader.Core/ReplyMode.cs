@@ -40,7 +40,10 @@ public static class TabFocus
     /// </summary>
     public const string Next = "next";
 
-    /// <summary>The chat that replied comes forward at once and its new reply is read.</summary>
+    /// <summary>
+    /// The chat that replied comes forward at once and its new reply is read, unless the tab in
+    /// front is reading a file, spoken text or a walkthrough.
+    /// </summary>
     public const string Newest = "newest";
 
     /// <summary>The "Tab focus" menu, in order.</summary>

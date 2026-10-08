@@ -375,6 +375,29 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Fact]
+    public void Stop_from_a_chat_without_a_tab_leaves_the_tab_in_front_alone()
+    {
+        Reply("s1", "One. Two.", "a", "100@1");
+
+        var stop = _tabs.Handle(new PipeRequest { Op = "stop", Process = "9@9" });
+
+        Assert.True(stop.Ok);
+        Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
+        Assert.Equal(2, Tab("s1").Queue.Count);
+        Assert.Contains("data-sid", Tab("s1").Html);
+    }
+
+    [Fact]
+    public void Stop_without_a_process_from_an_older_bridge_stops_the_tab_in_front()
+    {
+        Reply("s1", "One. Two.", "a", "100@1");
+
+        _tabs.Handle(new PipeRequest { Op = "stop" });
+
+        Assert.Equal(0, Tab("s1").Queue.Count);
+    }
+
+    [Fact]
     public void A_failed_tool_call_from_a_new_chat_leaves_no_tab()
     {
         Reply("s1", "One.", "a");
@@ -449,6 +472,22 @@ public sealed class ChatTabsTests : IDisposable
         Assert.Equal("notes.md", tab.Title);
         Assert.Same(tab, _tabs.Active);
         Assert.Equal(ReadingState.Idle, Tab("s1").Queue.State);
+    }
+
+    [Fact]
+    public void Jump_to_the_newest_does_not_interrupt_a_file_being_read()
+    {
+        var path = Path.Combine(_dir, "notes.md");
+        File.WriteAllText(path, "One. Two.");
+        var file = _tabs.OpenFile(path);
+        _focus = "newest";
+
+        var response = Reply("s1", "Reply.", "a");
+
+        Assert.Contains("without reading", response.Result!.Message);
+        Assert.Same(file, _tabs.Active);
+        Assert.Equal(ReadingState.Playing, file.Queue.State);
+        Assert.True(Tab("s1").Unread);
     }
 
     [Fact]

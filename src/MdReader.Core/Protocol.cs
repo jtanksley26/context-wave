@@ -30,7 +30,10 @@ public sealed record PipeRequest
     /// <summary>The chat's process (<see cref="ProcessIdentity"/>); sent with tool calls.</summary>
     public string? Process { get; init; }
 
-    /// <summary>The processes above the reply hook, nearest first; one of them is the chat's.</summary>
+    /// <summary>
+    /// Sent with replies: the chat's process, the parent of its tool bridge, or empty when it
+    /// cannot be found.
+    /// </summary>
     public IReadOnlyList<string>? Processes { get; init; }
 }
 

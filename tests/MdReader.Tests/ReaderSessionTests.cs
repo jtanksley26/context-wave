@@ -714,28 +714,33 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
-    public async Task A_reply_after_a_finished_walkthrough_is_read_and_the_diff_stays()
+    public async Task A_reply_after_a_finished_walkthrough_replaces_it()
     {
         ShowDiff(SampleDiff.Foo);
         Speak("About the change.", focus: "Foo.cs:2");
         await FinishReading();
+        _replaced.Clear();
         var response = Reply("Done.");
 
         Assert.StartsWith("Reading the reply", response.Result!.Message);
-        Assert.Equal(1, Status().DiffFiles);
-        Assert.Equal(2, _queue.Count);
+        Assert.Equal(0, Status().DiffFiles);
+        Assert.Null(_session.DiffTitle);
+        Assert.Equal(1, _queue.Count);
+        Assert.Equal("reply", _session.Source);
+        Assert.DoesNotContain("About the change", Assert.Single(_replaced));
     }
 
     [Fact]
-    public void A_reply_never_interrupts_a_walkthrough_being_read()
+    public void A_reply_is_not_mixed_into_a_walkthrough_still_being_read()
     {
         ShowDiff(SampleDiff.Foo);
         Speak("About the change.", focus: "Foo.cs:2");
         var response = Reply("Done.");
 
-        Assert.Contains("something else", response.Result!.Message);
-        Assert.Equal(0, _queue.CurrentIndex);
+        Assert.Equal("Skipped: a walkthrough is showing.", response.Result!.Message);
+        Assert.Equal(1, _queue.Count);
         Assert.Equal(1, Status().DiffFiles);
+        Assert.DoesNotContain(_appended, html => html.Contains("Done"));
     }
 
     [Fact]

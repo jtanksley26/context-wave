@@ -127,8 +127,10 @@ public sealed class ChatTabs
         // A request that reads something brings its chat to the front, so the one voice reads it.
         if (request.Op is not ("read_file" or "speak" or "show_diff"))
         {
-            // Asking about or stopping a chat that has no tab does not open one.
-            var target = existing ?? Active;
+            // Asking about or stopping a chat that has no tab does not open one, and never reaches
+            // another chat's tab. Only a request that does not say which chat it is from (an older
+            // bridge) goes to the tab in front.
+            var target = existing ?? (request.Process is { Length: > 0 } ? null : Active);
             if (target is not null) return target.Session.Handle(request);
             return request.Op switch
             {
@@ -226,11 +228,9 @@ public sealed class ChatTabs
         var reading = ReplyMode.Normalize(_replyMode()) != ReplyMode.Off;
         var focus = TabFocus.Normalize(_focus());
 
-        var opened = _tabs.Count;
         var tab = request.Session is { Length: > 0 } session
             ? SessionTab(session, request.Folder, request.Name, request.Processes ?? [])
             : Find(ClaudeKey) ?? Open(ClaudeKey, "Claude");
-        var isNew = _tabs.Count > opened;
         var text = request.Text ?? "";
 
         string result;
@@ -240,7 +240,7 @@ public sealed class ChatTabs
             if (Active is null) Select(tab);
             result = tab.Session.SpeakReply(text);
         }
-        else if (reading && focus == TabFocus.Newest)
+        else if (reading && focus == TabFocus.Newest && !ReadingOtherThanReplies(Active))
         {
             // Only the new reply is read; anything older in that tab stays where it is.
             Select(tab);
@@ -260,11 +260,15 @@ public sealed class ChatTabs
                 if (reading && focus == TabFocus.Next && IsDone(Active)) MoveToNext();
             }
         }
-
-        // A reply that was skipped (empty, too long, nothing to read) leaves no empty tab behind.
-        if (isNew && tab.Html.Length == 0) Close(tab);
         return result;
     }
+
+    /// <summary>
+    /// The tab is reading (or paused in) a file, text Claude was asked to speak, or a walkthrough,
+    /// which a reply from another chat never interrupts, even with "Jump to the newest".
+    /// </summary>
+    private static bool ReadingOtherThanReplies(ChatTab tab) =>
+        tab.Queue.State != ReadingState.Idle && tab.Session.Source != ReaderSession.ReplySource;
 
     /// <summary>A tab is done when it is not reading and nothing in it is left unread.</summary>
     private static bool IsDone(ChatTab tab) =>

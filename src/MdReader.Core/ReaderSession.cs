@@ -165,8 +165,9 @@ public sealed class ReaderSession(
 
     /// <summary>
     /// Adds one of Claude's replies to the end of the document, which keeps the chat's earlier
-    /// replies, and reads it if the mode and the reader's state allow. A file, a speak stream or a
-    /// walkthrough is never interrupted: the reply waits after it. Switch jumps to the new reply,
+    /// replies, and reads it if the mode and the reader's state allow. A file or a speak stream is
+    /// never interrupted: the reply waits after it. During a walkthrough the reply is skipped while
+    /// the walkthrough is still to be read, and replaces it once it has been. Switch jumps to the new reply,
     /// Queue reads it after the reply being read, and Off only adds it.
     /// </summary>
     /// <param name="hold">Add the reply without reading it, whatever the mode (a tab in the background).</param>
@@ -180,6 +181,16 @@ public sealed class ReaderSession(
         // A document that was loaded but not played (opened without the voice) is unread, not free.
         // After a document finishes, CurrentIndex is the sentence count.
         var unread = queue.CurrentIndex < queue.Count;
+        if (_diff is not null)
+        {
+            // A reply is never mixed into a walkthrough: it is skipped while the walkthrough is
+            // still to be read, and takes its place once it has been.
+            if (busy || unread) return "Skipped: a walkthrough is showing.";
+            queue.Stop();
+            ClearDiff();
+            _document = new MarkdownDocument(announceCodeBlocks());
+            Source = "";
+        }
         var other = Source is not ("" or ReplySource) && (busy || unread);
         string? wait = hold ? ""
             : mode == ReplyMode.Off ? ": reading replies is off"

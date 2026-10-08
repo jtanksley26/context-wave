@@ -22,11 +22,11 @@ public static class ReplyHook
         string? Message, string? TranscriptPath, string? SessionId, string? Folder, string Fields);
 
     public static Task<int> RunAsync(TextReader input, Func<PipeRequest, Task<PipeResponse>> send) =>
-        RunAsync(input, send, transcriptAttempts: 6, transcriptDelayMs: 300, ProcessIdentity.AncestorKeys);
+        RunAsync(input, send, transcriptAttempts: 6, transcriptDelayMs: 300, ProcessIdentity.ChatKeys);
 
     /// <param name="processes">
-    /// The processes above the hook. One is the chat's own, which is also the parent of the chat's
-    /// tool bridge; Context Wave uses it to send the chat's tool calls to the same tab.
+    /// The chat's own process, which is also the parent of the chat's tool bridge; Context Wave
+    /// uses it to send the chat's tool calls to the same tab.
     /// </param>
     public static async Task<int> RunAsync(
         TextReader input, Func<PipeRequest, Task<PipeResponse>> send, int transcriptAttempts, int transcriptDelayMs,

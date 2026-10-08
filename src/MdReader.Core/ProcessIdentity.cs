@@ -19,26 +19,60 @@ public static class ProcessIdentity
     /// <summary>The key of this process's parent, or null when it cannot be found.</summary>
     public static string? ParentKey()
     {
-        var parents = ParentMap();
-        return parents.TryGetValue(Environment.ProcessId, out var parent) && IsParent(parent, Environment.ProcessId)
-            ? KeyOf(parent)
+        var processes = ProcessMap();
+        return processes.TryGetValue(Environment.ProcessId, out var entry) && IsParent(entry.Parent, Environment.ProcessId)
+            ? KeyOf(entry.Parent)
             : null;
     }
 
-    /// <summary>The keys of the processes above this one, nearest first.</summary>
-    public static IReadOnlyList<string> AncestorKeys()
+    /// <summary>
+    /// For the reply hook: the key of the chat's process, the one its tool bridge reports as its
+    /// parent, in a list of one; empty when it cannot be found. Only that process is sent: the
+    /// processes further up (a terminal, or the desktop app that runs every chat) are shared by
+    /// other chats, and linking them to this chat would send other chats' tool calls to its tab.
+    /// </summary>
+    public static IReadOnlyList<string> ChatKeys()
     {
-        var parents = ParentMap();
-        var keys = new List<string>();
-        var seen = new HashSet<int> { Environment.ProcessId };
-        var child = Environment.ProcessId;
-        while (keys.Count < MaxDepth && parents.TryGetValue(child, out var parent) && seen.Add(parent)
-               && IsParent(parent, child))
+        var processes = ProcessMap();
+        var self = Environment.ProcessId;
+        var ancestors = new List<int>();
+        var seen = new HashSet<int> { self };
+        var child = self;
+        while (ancestors.Count < MaxDepth && processes.TryGetValue(child, out var entry) && seen.Add(entry.Parent)
+               && IsParent(entry.Parent, child))
         {
-            keys.Add(KeyOf(parent));
-            child = parent;
+            ancestors.Add(entry.Parent);
+            child = entry.Parent;
         }
-        return keys;
+        var exe = Path.GetFileName(Environment.ProcessPath) ?? "";
+        return ChatProcess(ancestors, processes, self, exe) is { } chat ? [KeyOf(chat)] : [];
+    }
+
+    // What Claude Code may run a hook through, between the chat and the hook.
+    private static readonly HashSet<string> Shells = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "bash.exe", "sh.exe", "cmd.exe", "pwsh.exe", "powershell.exe",
+    };
+
+    /// <summary>
+    /// The chat: the first ancestor that is not a shell, provided it has started a tool bridge (a
+    /// copy of this program other than this one; the hook runs as a copy too). Never one further
+    /// up: when the chat has no bridge, the next process up is shared by other chats.
+    /// </summary>
+    /// <param name="ancestors">Process ids above <paramref name="self"/>, nearest first.</param>
+    /// <param name="processes">Every process's parent id and program file name.</param>
+    public static int? ChatProcess(
+        IReadOnlyList<int> ancestors, IReadOnlyDictionary<int, (int Parent, string Exe)> processes, int self,
+        string exe)
+    {
+        foreach (var ancestor in ancestors)
+        {
+            if (processes.Any(p => p.Key != self && p.Value.Parent == ancestor
+                                   && string.Equals(p.Value.Exe, exe, StringComparison.OrdinalIgnoreCase)))
+                return ancestor;
+            if (!processes.TryGetValue(ancestor, out var entry) || !Shells.Contains(entry.Exe)) return null;
+        }
+        return null;
     }
 
     /// <summary>
@@ -62,17 +96,17 @@ public static class ProcessIdentity
         }
     }
 
-    /// <summary>Every process's parent id, from one snapshot of the process list.</summary>
-    private static Dictionary<int, int> ParentMap()
+    /// <summary>Every process's parent id and program file name, from one snapshot of the process list.</summary>
+    private static Dictionary<int, (int Parent, string Exe)> ProcessMap()
     {
-        var map = new Dictionary<int, int>();
+        var map = new Dictionary<int, (int Parent, string Exe)>();
         var snapshot = CreateToolhelp32Snapshot(SnapProcess, 0);
         if (snapshot == InvalidHandle) return map;
         try
         {
             var entry = new ProcessEntry { Size = (uint)Marshal.SizeOf<ProcessEntry>() };
             for (var more = Process32FirstW(snapshot, ref entry); more; more = Process32NextW(snapshot, ref entry))
-                map[(int)entry.ProcessId] = (int)entry.ParentProcessId;
+                map[(int)entry.ProcessId] = ((int)entry.ParentProcessId, entry.ExeFile ?? "");
         }
         finally
         {
