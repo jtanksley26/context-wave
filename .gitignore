@@ -6,3 +6,8 @@ out-dev/
 *.user
 out-pkg/
 dist/
+
+# Not a Node project: npm files that tools sometimes drop here.
+node_modules/
+package.json
+package-lock.json
