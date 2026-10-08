@@ -53,6 +53,7 @@ public static class ReplyHook
                 Text = reply,
                 Session = stop.SessionId,
                 Folder = stop.Folder,
+                Name = string.IsNullOrWhiteSpace(stop.TranscriptPath) ? null : ChatName(ReadTail(stop.TranscriptPath)),
                 Processes = processes?.Invoke(),
             });
             // A skipped reply is a success to the hook, so the app's own explanation is the only trace of why.
@@ -159,6 +160,36 @@ public static class ReplyHook
 
         var reply = string.Join("\n\n", parts).Trim();
         return reply.Length == 0 ? null : reply;
+    }
+
+    /// <summary>
+    /// The chat's name as Claude shows it: the latest "custom-title" entry in the transcript, else
+    /// the latest "agent-name" entry, else null. Claude Code writes the title into the transcript
+    /// again every few turns, so it is in the end of the file that is read.
+    /// </summary>
+    public static string? ChatName(IReadOnlyList<string> lines)
+    {
+        string? agentName = null;
+        for (var i = lines.Count - 1; i >= 0; i--)
+        {
+            // Cheap test first: most lines are long message entries.
+            if (!lines[i].Contains("\"custom-title\"") && (agentName is not null || !lines[i].Contains("\"agent-name\"")))
+                continue;
+            try
+            {
+                using var document = JsonDocument.Parse(lines[i]);
+                var entry = document.RootElement;
+                if (entry.ValueKind != JsonValueKind.Object) continue;
+                var type = Text(entry, "type");
+                if (type == "custom-title" && Text(entry, "customTitle") is { } title) return title.Trim();
+                if (type == "agent-name") agentName ??= Text(entry, "agentName")?.Trim();
+            }
+            catch (JsonException)
+            {
+                // A line still being written, or the cut-off first line of the tail.
+            }
+        }
+        return agentName;
     }
 
     /// <summary>The lines at the end of a file that another process may still be writing.</summary>

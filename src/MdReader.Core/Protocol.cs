@@ -21,8 +21,11 @@ public sealed record PipeRequest
     /// <summary>The Claude Code session id; sent with replies.</summary>
     public string? Session { get; init; }
 
-    /// <summary>The chat's working folder, used to name its tab.</summary>
+    /// <summary>The chat's working folder; names its tab until the chat's own name is known.</summary>
     public string? Folder { get; init; }
+
+    /// <summary>The chat's name as Claude shows it; sent with replies and used for its tab.</summary>
+    public string? Name { get; init; }
 
     /// <summary>The chat's process (<see cref="ProcessIdentity"/>); sent with tool calls.</summary>
     public string? Process { get; init; }

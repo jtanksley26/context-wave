@@ -37,6 +37,9 @@ public sealed class ChatTab
     /// <summary>The chat's working folder, or null.</summary>
     public string? Folder { get; internal set; }
 
+    /// <summary>The chat's name as Claude shows it, or null until a reply has brought it.</summary>
+    public string? ChatName { get; internal set; }
+
     public ReaderSession Session { get; }
     public ReadingQueue Queue { get; }
 
@@ -225,7 +228,7 @@ public sealed class ChatTabs
 
         var opened = _tabs.Count;
         var tab = request.Session is { Length: > 0 } session
-            ? SessionTab(session, request.Folder, request.Processes ?? [])
+            ? SessionTab(session, request.Folder, request.Name, request.Processes ?? [])
             : Find(ClaudeKey) ?? Open(ClaudeKey, "Claude");
         var isNew = _tabs.Count > opened;
         var text = request.Text ?? "";
@@ -288,7 +291,7 @@ public sealed class ChatTabs
     /// its tool calls find this tab, and a tab its tool calls opened before its first reply becomes
     /// this tab.
     /// </summary>
-    private ChatTab SessionTab(string session, string? folder, IReadOnlyList<string> processes)
+    private ChatTab SessionTab(string session, string? folder, string? name, IReadOnlyList<string> processes)
     {
         foreach (var process in processes) _sessionByProcess[process] = session;
 
@@ -303,12 +306,15 @@ public sealed class ChatTabs
                 TabsChanged?.Invoke();
             }
         }
-        tab ??= Open(key, TitleFor(folder));
+        tab ??= Open(key, name is { Length: > 0 } ? name : TitleFor(folder));
         tab.SessionId = session;
-        if (folder is { Length: > 0 } && tab.Folder != folder)
+        if (folder is { Length: > 0 }) tab.Folder = folder;
+        // Renaming the chat in Claude renames its tab with the next reply; a reply without a name keeps it.
+        if (name is { Length: > 0 }) tab.ChatName = name;
+        var title = tab.ChatName ?? TitleFor(tab.Folder);
+        if (tab.Title != title)
         {
-            tab.Folder = folder;
-            tab.Title = TitleFor(folder);
+            tab.Title = title;
             TabsChanged?.Invoke();
         }
         return tab;

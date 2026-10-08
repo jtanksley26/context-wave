@@ -222,7 +222,7 @@ public partial class MainWindow : Window
         var title = new TextBlock
         {
             Text = tab.Title,
-            MaxWidth = 180,
+            MaxWidth = 220,
             TextTrimming = TextTrimming.CharacterEllipsis,
             VerticalAlignment = VerticalAlignment.Center,
             FontWeight = inFront ? FontWeights.SemiBold : FontWeights.Normal,
@@ -265,6 +265,7 @@ public partial class MainWindow : Window
     {
         if (tab.Key.StartsWith("file:", StringComparison.Ordinal)) return tab.Key["file:".Length..];
         var lines = new List<string>();
+        if (tab.ChatName is { } name) lines.Add(name);
         if (tab.Folder is { } folder) lines.Add(folder);
         lines.Add(tab.SessionId is { } session ? $"Chat {session[..Math.Min(8, session.Length)]}" : "Claude");
         return string.Join(Environment.NewLine, lines);

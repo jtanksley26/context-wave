@@ -33,6 +33,45 @@ public sealed class ChatTabsTests : IDisposable
             Op = "speak_reply", Text = text, Session = session, Folder = folder, Processes = processes,
         });
 
+    private PipeResponse NamedReply(string session, string text, string? name, string? folder = null) =>
+        _tabs.Handle(new PipeRequest { Op = "speak_reply", Text = text, Session = session, Folder = folder, Name = name });
+
+    [Fact]
+    public void A_tab_is_named_after_its_chat_and_follows_a_rename()
+    {
+        NamedReply("s1", "One.", "POS-50 branch breakdown", @"D:\Projects\Git\sql");
+        Assert.Equal("POS-50 branch breakdown", Tab("s1").Title);
+
+        _replies = "queue";
+        NamedReply("s1", "Two.", "POS-50 branch merge", @"D:\Projects\Git\sql");
+        Assert.Equal("POS-50 branch merge", Tab("s1").Title);
+    }
+
+    [Fact]
+    public void A_tab_keeps_its_chat_name_when_a_later_reply_has_none()
+    {
+        NamedReply("s1", "One.", "Ticket triage", "sql");
+        _replies = "queue";
+        NamedReply("s1", "Two.", null, "sql");
+
+        Assert.Equal("Ticket triage", Tab("s1").Title);
+    }
+
+    [Fact]
+    public void A_tab_opened_by_a_tool_call_takes_the_chat_name_from_the_first_reply()
+    {
+        Speak("Hello.", "300@7", @"C:\work\api");
+        Assert.Equal("api", Assert.Single(_tabs.Tabs).Title);
+
+        _tabs.Handle(new PipeRequest
+        {
+            Op = "speak_reply", Text = "Done.", Session = "s3", Folder = @"C:\work\api", Name = "API cleanup",
+            Processes = ["300@7"],
+        });
+
+        Assert.Equal("API cleanup", Assert.Single(_tabs.Tabs).Title);
+    }
+
     private PipeResponse Speak(string text, string? process, string? folder = null) =>
         _tabs.Handle(new PipeRequest { Op = "speak", Text = text, Mode = "append", Process = process, Folder = folder });
 
