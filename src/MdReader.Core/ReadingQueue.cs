@@ -60,7 +60,7 @@ public sealed class ReadingQueue
     /// <summary>The id of the sentence reading is at or would resume from, or null past the end.</summary>
     public int? CurrentSentenceId
     {
-        get { lock (_gate) return _index < _sentences.Count ? _sentences[_index].Id : null; }
+        get { lock (_gate) return SentenceIdAt(_index); }
     }
 
     public void Load(IReadOnlyList<Sentence> sentences, bool autoPlay = true)
@@ -74,10 +74,7 @@ public sealed class ReadingQueue
         RaiseState();
     }
 
-    /// <param name="holdBack">
-    /// Add the sentences without reading them: reading in progress stops before them, and they
-    /// are read on Play or when one of them is jumped to.
-    /// </param>
+    /// <param name="holdBack">Add without reading: reading in progress stops before them.</param>
     public void Append(IReadOnlyList<Sentence> sentences, bool autoPlay = true, bool holdBack = false)
     {
         if (sentences.Count == 0) return;

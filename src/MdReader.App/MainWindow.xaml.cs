@@ -48,7 +48,7 @@ public partial class MainWindow : Window
         _tabs = new ChatTabs(
             () => new ReadingQueue(_tts, _output, _settings.ToVoice),
             () => _settings.AnnounceCodeBlocks, VoiceReady, () => _settings.Replies,
-            () => _settings.Focus, action => Dispatcher.InvokeAsync(action));
+            () => _settings.WhenPlaying, action => Dispatcher.InvokeAsync(action));
         _view = new DocumentView(WebView);
         _pipe = new PipeServer(
             PipeProtocol.DefaultPipeName,
@@ -505,38 +505,31 @@ public partial class MainWindow : Window
 
     private void BuildRepliesMenu()
     {
-        foreach (var (id, name) in ReplyMode.Choices)
-        {
-            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
-            item.Click += OnRepliesClick;
-            RepliesMenu.Items.Add(item);
-        }
-        foreach (var (id, name) in TabFocus.Choices)
-        {
-            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
-            item.Click += (_, _) =>
-            {
-                _settings.Focus = id;
-                SaveSettings();
-                TickReplies();
-            };
-            FocusMenu.Items.Add(item);
-        }
+        AddChoices(RepliesMenu, ReplyMode.Choices, id => _settings.Replies = id);
+        AddChoices(WhenPlayingMenu, WhenPlaying.Choices, id => _settings.WhenPlaying = id);
         TickReplies();
+
+        void AddChoices(MenuItem menu, IReadOnlyList<(string Id, string DisplayName)> choices, Action<string> set)
+        {
+            foreach (var (id, name) in choices)
+            {
+                var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
+                item.Click += (_, _) =>
+                {
+                    set(id);
+                    SaveSettings();
+                    TickReplies();
+                };
+                menu.Items.Add(item);
+            }
+        }
     }
 
     /// <summary>Clicking a checkable item toggles it first, so set every tick from the settings.</summary>
     private void TickReplies()
     {
         Tick(RepliesMenu, ReplyMode.Normalize(_settings.Replies));
-        Tick(FocusMenu, TabFocus.Normalize(_settings.Focus));
-    }
-
-    private void OnRepliesClick(object sender, RoutedEventArgs e)
-    {
-        _settings.Replies = (string)((MenuItem)sender).Tag;
-        SaveSettings();
-        TickReplies();
+        Tick(WhenPlayingMenu, WhenPlaying.Normalize(_settings.WhenPlaying));
     }
 
     private void BuildVisualizerMenu()

@@ -102,11 +102,38 @@ public sealed class SettingsTests : IDisposable
     {
         Assert.Equal("off", Settings.Load(File_).Replies);
 
-        new Settings { Replies = "queue" }.Save(File_);
-        Assert.Equal("queue", Settings.Load(File_).Replies);
+        new Settings { Replies = "all" }.Save(File_);
+        Assert.Equal("all", Settings.Load(File_).Replies);
 
         File.WriteAllText(File_, "{\"Replies\":null}");
         Assert.Equal("off", Settings.Load(File_).Replies);
+    }
+
+    [Fact]
+    public void When_playing_defaults_to_wait_round_trips_and_falls_back_when_blank()
+    {
+        Assert.Equal("wait", Settings.Load(File_).WhenPlaying);
+
+        new Settings { WhenPlaying = "interrupt" }.Save(File_);
+        Assert.Equal("interrupt", Settings.Load(File_).WhenPlaying);
+
+        File.WriteAllText(File_, "{\"WhenPlaying\":null}");
+        Assert.Equal("wait", Settings.Load(File_).WhenPlaying);
+    }
+
+    [Theory]
+    [InlineData("switch", "tab", "interrupt")]
+    [InlineData("queue", "tab", "wait")]
+    [InlineData("finish", "tab", "wait")]
+    [InlineData("off", "off", "wait")]
+    public void The_replaced_Claudes_replies_modes_are_translated(string replies, string autoRead, string whenPlaying)
+    {
+        new Settings().Save(File_);
+        File.WriteAllText(File_, $"{{\"Replies\":\"{replies}\"}}");
+
+        var settings = Settings.Load(File_);
+
+        Assert.Equal((autoRead, whenPlaying), (settings.Replies, settings.WhenPlaying));
     }
 
     [Fact]

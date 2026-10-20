@@ -76,35 +76,35 @@ it has a name), and every reply is added to the end of its chat's tab, so a tab 
 running record. Files you open get a tab of their own. Close a tab with its × or a middle click.
 
 There is one voice, and it reads the tab in front. Choosing another tab stops reading where it
-was; Play carries on from there. Two settings decide what happens when a reply arrives:
+was; Play carries on from there. Two settings, each answering one question, decide the rest:
 
-**Settings > Claude's replies**: how the tab in front reads a new reply.
+**Settings > Auto Read**: which chats' replies are read aloud by themselves.
 
-- **Off** (the default): replies are still added to their tabs (with a dot), but nothing is read
-  aloud by itself.
-- **Read the newest right away**: a new reply interrupts and is read at once.
-- **Read after the current one**: a new reply is read when the current one finishes.
+- **Off** (the default): none. Replies are still added to their tabs, with a dot.
+- **This tab**: the chat in front. Other chats' replies wait in their tabs, with a dot.
+- **All chats**: every chat. A chat whose reply is read comes to the front.
 
-**Settings > Tab focus**: whether another chat's reply brings its tab forward.
+**Settings > When something is playing**: what a new reply, or a chat's request to read something
+(`speak`, `read_file`, `show_diff`), does when something is already being read or is paused.
 
-- **Stay on this tab** (the default): the reply is added to its chat's tab, which gets a dot.
-- **Move to the next chat when done**: once the tab in front has nothing left to read (including
-  replies that arrived in it meanwhile), the chats with unread replies come forward one after
-  another, in the order their replies arrived. Each is read from its first unread reply to the end,
-  never from halfway.
-- **Jump to the newest**: the chat that replied comes forward at once and its new reply is read,
-  unless the tab in front is reading something other than replies (see below).
+- **Wait your turn** (the default): in its own tab it is read after what is playing. From another
+  chat it waits in that chat's tab, with a dot, and the chats come forward one after another, in
+  the order things arrived, once the tab in front has finished. Each is read from its first unread
+  sentence, never from halfway.
+- **Interrupt**: it is read at once. What was playing stops where it is, keeping its place, and
+  the chat it came from comes forward.
 
-With replies off, focus never moves by itself either. A reply never interrupts a file, text Claude
-was asked to speak, or a diff walkthrough, whether in its own tab or in the tab in front: it is
-added without being read (with a dot when its tab is not in front). The one exception is a
-walkthrough in the reply's own tab: while the walkthrough is still to be read the reply is
-dropped, and once it has been read the next reply replaces it.
+A chat's request to read something is not a reply, so Auto Read does not silence it: with Wait it takes its turn even with Auto Read off, and is read from the
+request itself, not from older replies left unread. With Auto Read off, focus only moves for such
+requests.
 
-The reply hook sends the chat's session id and the chat's process (the one that started its tool
-bridge); each chat's tool calls send the same process. That is how a tool call from a chat (`read_file`, `speak`, `show_diff`) lands
-in that chat's tab and brings it forward. A request that carries neither, from an older bridge,
-goes to the tab in front, or to a "Claude" tab.
+The one exception is a diff walkthrough: a reply that arrives in a chat's tab while its walkthrough
+is still to be read is dropped rather than mixed into it, and once it has been read the next reply
+replaces it.
+
+The earlier "Claude's replies" setting is translated the first time this version starts. A request
+from an older bridge, which does not say which chat it is from, goes to the tab in front, or to a
+"Claude" tab.
 
 ## Environment
 
@@ -121,4 +121,4 @@ dotnet test MdReader.sln --filter "Category!=Manual"
 synthesizes a sentence.
 
 ---
-*Last updated: 2026-10-08 by Drew Smith — merged the replies section into the tab section; noted that code blocks and diagrams are not click-to-read*
+*Last updated: 2026-10-20 by Drew Smith — replaced the "Claude's replies" modes with Auto Read (Off / This tab / All chats) and When something is playing (Wait / Interrupt); trimmed implementation detail*

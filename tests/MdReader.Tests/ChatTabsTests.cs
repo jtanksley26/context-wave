@@ -1,7 +1,9 @@
+using System.Collections.Concurrent;
 using MdReader.Core;
 
 namespace MdReader.Tests;
 
+/// <summary>Routing, tabs and turn order. Every settings combination is in <see cref="ChatTabsSettingsMatrixTests"/>.</summary>
 public sealed class ChatTabsTests : IDisposable
 {
     private readonly string _dir = Directory.CreateTempSubdirectory("mdreader-tabs-").FullName;
@@ -9,15 +11,16 @@ public sealed class ChatTabsTests : IDisposable
     private readonly FakeTts _tts = new();
     private readonly ChatTabs _tabs;
     private readonly List<ChatTab?> _activated = [];
-    private string _replies = "switch";
-    private string _focus = "stay";
+    private readonly ConcurrentQueue<Action> _dispatched = new();
+    private string _autoRead = "tab";
+    private string _whenPlaying = "interrupt";
     private bool _announce = true;
 
     public ChatTabsTests()
     {
         _tabs = new ChatTabs(
             () => new ReadingQueue(_tts, _output, () => new VoiceSettings("m", 0, 1f), (_, _) => Task.CompletedTask),
-            () => _announce, () => true, () => _replies, () => _focus);
+            () => _announce, () => true, () => _autoRead, () => _whenPlaying, _dispatched.Enqueue);
         _tabs.ActiveChanged += _activated.Add;
     }
 
@@ -27,50 +30,11 @@ public sealed class ChatTabsTests : IDisposable
         Directory.Delete(_dir, recursive: true);
     }
 
-    private PipeResponse Reply(string session, string text, string? folder = null, params string[] processes) =>
+    private PipeResponse Reply(string session, string text, string? folder = null, string? process = null, string? name = null) =>
         _tabs.Handle(new PipeRequest
         {
-            Op = "speak_reply", Text = text, Session = session, Folder = folder, Processes = processes,
+            Op = "speak_reply", Text = text, Session = session, Folder = folder, Process = process, Name = name,
         });
-
-    private PipeResponse NamedReply(string session, string text, string? name, string? folder = null) =>
-        _tabs.Handle(new PipeRequest { Op = "speak_reply", Text = text, Session = session, Folder = folder, Name = name });
-
-    [Fact]
-    public void A_tab_is_named_after_its_chat_and_follows_a_rename()
-    {
-        NamedReply("s1", "One.", "POS-50 branch breakdown", @"D:\Projects\Git\sql");
-        Assert.Equal("POS-50 branch breakdown", Tab("s1").Title);
-
-        _replies = "queue";
-        NamedReply("s1", "Two.", "POS-50 branch merge", @"D:\Projects\Git\sql");
-        Assert.Equal("POS-50 branch merge", Tab("s1").Title);
-    }
-
-    [Fact]
-    public void A_tab_keeps_its_chat_name_when_a_later_reply_has_none()
-    {
-        NamedReply("s1", "One.", "Ticket triage", "sql");
-        _replies = "queue";
-        NamedReply("s1", "Two.", null, "sql");
-
-        Assert.Equal("Ticket triage", Tab("s1").Title);
-    }
-
-    [Fact]
-    public void A_tab_opened_by_a_tool_call_takes_the_chat_name_from_the_first_reply()
-    {
-        Speak("Hello.", "300@7", @"C:\work\api");
-        Assert.Equal("api", Assert.Single(_tabs.Tabs).Title);
-
-        _tabs.Handle(new PipeRequest
-        {
-            Op = "speak_reply", Text = "Done.", Session = "s3", Folder = @"C:\work\api", Name = "API cleanup",
-            Processes = ["300@7"],
-        });
-
-        Assert.Equal("API cleanup", Assert.Single(_tabs.Tabs).Title);
-    }
 
     private PipeResponse Speak(string text, string? process, string? folder = null) =>
         _tabs.Handle(new PipeRequest { Op = "speak", Text = text, Mode = "append", Process = process, Folder = folder });
@@ -80,12 +44,37 @@ public sealed class ChatTabsTests : IDisposable
     /// <summary>Lets each sentence finish as it is played until the condition holds.</summary>
     private Task PlayUntil(Func<bool> condition) => TestUtil.WaitUntil(() =>
     {
+        while (_dispatched.TryDequeue(out var action)) action();
         _output.Release();
         return condition();
     });
 
-    /// <summary>The texts of the sentences played so far (FakeTts makes each clip as long as its text).</summary>
+    /// <summary>How many sentences have played (FakeTts makes each clip as long as its text).</summary>
     private int PlayedCount => _output.Played.Count;
+
+    private static bool IsDoneReading(ChatTab tab) =>
+        tab.Queue.State == ReadingState.Idle && tab.Queue.CurrentIndex >= tab.Queue.Count;
+
+    [Fact]
+    public void A_tab_is_named_after_its_chat_and_follows_a_rename()
+    {
+        Reply("s1", "One.", @"D:\Projects\Git\sql", name: "POS-50 branch breakdown");
+        Assert.Equal("POS-50 branch breakdown", Tab("s1").Title);
+
+        _whenPlaying = "wait";
+        Reply("s1", "Two.", @"D:\Projects\Git\sql", name: "POS-50 branch merge");
+        Assert.Equal("POS-50 branch merge", Tab("s1").Title);
+    }
+
+    [Fact]
+    public void A_tab_keeps_its_chat_name_when_a_later_reply_has_none()
+    {
+        Reply("s1", "One.", "sql", name: "Ticket triage");
+        _whenPlaying = "wait";
+        Reply("s1", "Two.", "sql");
+
+        Assert.Equal("Ticket triage", Tab("s1").Title);
+    }
 
     [Fact]
     public void A_reply_opens_a_tab_named_after_its_folder_and_reads_it()
@@ -99,32 +88,6 @@ public sealed class ChatTabsTests : IDisposable
         Assert.Same(tab, _tabs.Active);
         Assert.Equal(ReadingState.Playing, tab.Queue.State);
         Assert.Contains("data-sid", tab.Html);
-    }
-
-    [Fact]
-    public void Replies_from_the_same_chat_add_to_its_tab()
-    {
-        Reply("s1", "One.", "a");
-        _replies = "queue";
-        Reply("s1", "Two.", "a");
-
-        var tab = Assert.Single(_tabs.Tabs);
-        Assert.Equal(2, tab.Queue.Count);
-        Assert.Contains("<hr>", tab.Html);
-    }
-
-    [Fact]
-    public void By_default_another_chats_reply_is_added_to_its_tab_unread_and_not_read()
-    {
-        Reply("s1", "One.", "a");
-        var response = Reply("s2", "Two.", "b");
-
-        Assert.Contains("without reading", response.Result!.Message);
-        Assert.Equal(2, _tabs.Tabs.Count);
-        Assert.Equal("s1", _tabs.Active!.SessionId);
-        Assert.True(Tab("s2").Unread);
-        Assert.Equal(ReadingState.Idle, Tab("s2").Queue.State);
-        Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
     }
 
     [Fact]
@@ -143,26 +106,11 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Fact]
-    public void Jump_to_the_newest_brings_the_replying_chat_forward_and_reads_its_new_reply()
-    {
-        _focus = "newest";
-        Reply("s1", "One. Two.", "a");
-        var response = Reply("s2", "Three.", "b");
-
-        Assert.StartsWith("Reading the reply", response.Result!.Message);
-        Assert.Equal("s2", _tabs.Active!.SessionId);
-        Assert.Equal(ReadingState.Playing, Tab("s2").Queue.State);
-        Assert.Equal(ReadingState.Idle, Tab("s1").Queue.State);
-        Assert.False(Tab("s2").Unread);
-    }
-
-    [Fact]
     public void Jump_to_the_newest_reads_only_the_new_reply_not_older_unread_ones()
     {
         Reply("s1", "One.", "a");
         Reply("s2", "Old one. Old two.", "b");
-        _focus = "newest";
-        _replies = "queue";
+        _autoRead = "all";
         Reply("s2", "Newest.", "b");
 
         Assert.Equal("s2", _tabs.Active!.SessionId);
@@ -170,24 +118,10 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Fact]
-    public async Task Move_to_next_reads_the_waiting_chat_once_the_tab_in_front_is_done()
-    {
-        _focus = "next";
-        _replies = "queue";
-        Reply("s1", "One.", "a");
-        Reply("s2", "Two.", "b");
-        Assert.Equal("s1", _tabs.Active!.SessionId);
-        Assert.True(Tab("s2").Unread);
-
-        await PlayUntil(() => _tabs.Active!.SessionId == "s2" && PlayedCount >= 2);
-        Assert.False(Tab("s2").Unread);
-    }
-
-    [Fact]
     public async Task Move_to_next_goes_through_the_waiting_chats_in_the_order_their_replies_arrived()
     {
-        _focus = "next";
-        _replies = "queue";
+        _autoRead = "all";
+        _whenPlaying = "wait";
         var order = new List<string?>();
         _tabs.ActiveChanged += tab => order.Add(tab?.SessionId);
         Reply("s1", "One.", "a");
@@ -203,8 +137,8 @@ public sealed class ChatTabsTests : IDisposable
     [Fact]
     public async Task Move_to_next_finishes_a_reply_added_to_the_tab_in_front_before_moving_on()
     {
-        _focus = "next";
-        _replies = "queue";
+        _autoRead = "all";
+        _whenPlaying = "wait";
         Reply("s1", "One.", "a");
         Reply("s2", "Two.", "b");
         Reply("s1", "One more.", "a");
@@ -226,8 +160,8 @@ public sealed class ChatTabsTests : IDisposable
         Reply("s2", "Three.", "b");                   // and gets a new reply in the background
         Tab("s1").Queue.Stop();
 
-        _focus = "next";
-        _replies = "queue";
+        _autoRead = "all";
+        _whenPlaying = "wait";
         Reply("s9", "Nine.", "z");                    // anything arriving while s1 is done moves on
 
         Assert.Equal("s2", _tabs.Active!.SessionId);
@@ -235,24 +169,10 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Fact]
-    public void Move_to_next_moves_at_once_when_nothing_is_being_read()
-    {
-        _focus = "next";
-        _replies = "queue";
-        Reply("s1", "One.", "a");
-        Tab("s1").Queue.Next();                       // past the end: done
-
-        Reply("s2", "Two.", "b");
-
-        Assert.Equal("s2", _tabs.Active!.SessionId);
-        Assert.Equal(ReadingState.Playing, Tab("s2").Queue.State);
-    }
-
-    [Fact]
     public void Choosing_a_tab_takes_it_out_of_the_line()
     {
-        _focus = "next";
-        _replies = "queue";
+        _autoRead = "all";
+        _whenPlaying = "wait";
         Reply("s1", "One.", "a");
         Reply("s2", "Two.", "b");
         _tabs.Select(Tab("s2"));
@@ -265,13 +185,12 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Theory]
-    [InlineData("stay")]
-    [InlineData("next")]
-    [InlineData("newest")]
-    public void With_replies_off_they_are_collected_with_dots_and_focus_never_moves(string focus)
+    [InlineData("wait")]
+    [InlineData("interrupt")]
+    public void With_auto_read_off_replies_are_collected_with_dots_and_focus_never_moves(string whenPlaying)
     {
-        _focus = focus;
-        _replies = "off";
+        _whenPlaying = whenPlaying;
+        _autoRead = "off";
         Reply("s1", "One.", "a");
         Reply("s2", "Two.", "b");
 
@@ -281,14 +200,11 @@ public sealed class ChatTabsTests : IDisposable
         Assert.All(_tabs.Tabs, tab => Assert.Equal(ReadingState.Idle, tab.Queue.State));
     }
 
-    private static bool IsDoneReading(ChatTab tab) =>
-        tab.Queue.State == ReadingState.Idle && tab.Queue.CurrentIndex >= tab.Queue.Count;
-
     [Fact]
     public void A_tool_call_goes_to_the_tab_of_the_chat_its_process_belongs_to()
     {
-        Reply("s1", "One.", "a", "100@1", "50@1");
-        Reply("s2", "Two.", "b", "200@1", "50@1");
+        Reply("s1", "One.", "a", "100@1");
+        Reply("s2", "Two.", "b", "200@1");
 
         var response = Speak("Read this.", "100@1");
 
@@ -319,13 +235,14 @@ public sealed class ChatTabsTests : IDisposable
         Assert.Equal("process:300@7", opened.Key);
         Assert.Equal("api", opened.Title);
 
-        _replies = "queue";
-        Reply("s3", "Done.", @"C:\work\api", "300@7");
+        _whenPlaying = "wait";
+        Reply("s3", "Done.", @"C:\work\api", "300@7", name: "API cleanup");
 
         var tab = Assert.Single(_tabs.Tabs);
         Assert.Same(opened, tab);
         Assert.Equal("session:s3", tab.Key);
         Assert.Equal("s3", tab.SessionId);
+        Assert.Equal("API cleanup", tab.Title);
         Assert.Equal(2, tab.Queue.Count);
     }
 
@@ -423,7 +340,7 @@ public sealed class ChatTabsTests : IDisposable
     [Fact]
     public void A_reply_with_nothing_to_read_opens_no_tab_and_does_not_switch()
     {
-        _focus = "newest";
+        _autoRead = "all";
         Reply("s1", "One.", "a");
         _announce = false;
         var response = Reply("s2", "~~~\ncode\n~~~", "b");
@@ -475,19 +392,38 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Fact]
-    public void Jump_to_the_newest_does_not_interrupt_a_file_being_read()
+    public async Task With_wait_another_chats_tool_call_waits_its_turn_then_is_read_from_the_request()
     {
-        var path = Path.Combine(_dir, "notes.md");
-        File.WriteAllText(path, "One. Two.");
-        var file = _tabs.OpenFile(path);
-        _focus = "newest";
+        Reply("s1", "One.", "a", "100@1");
+        Reply("s2", "Reply.", "b", "200@1");
+        _whenPlaying = "wait";
 
-        var response = Reply("s1", "Reply.", "a");
+        var response = Speak("Read this.", "200@1");
 
-        Assert.Contains("without reading", response.Result!.Message);
-        Assert.Same(file, _tabs.Active);
-        Assert.Equal(ReadingState.Playing, file.Queue.State);
-        Assert.True(Tab("s1").Unread);
+        // s1 keeps reading; s2's request waits in its tab, with a dot...
+        Assert.True(response.Ok, response.Error);
+        Assert.Contains("when this chat's turn comes", response.Result!.Message);
+        Assert.Equal("s1", _tabs.Active!.SessionId);
+        Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
+        Assert.True(Tab("s2").Unread);
+        Assert.Equal(ReadingState.Idle, Tab("s2").Queue.State);
+        // ...and is read from the request, not from the older reply This tab left unread...
+        Assert.Equal(1, Tab("s2").FirstUnreadId);
+        // ...once s1 has finished.
+        await PlayUntil(() => _tabs.Active!.SessionId == "s2");
+        await PlayUntil(() => IsDoneReading(Tab("s2")));
+        Assert.Equal(2, PlayedCount); // "One." and "Read this.": the older reply was not read
+    }
+
+    [Fact]
+    public void Activate_raises_the_event_and_unknown_ops_fail()
+    {
+        var activated = false;
+        _tabs.ActivateRequested += () => activated = true;
+
+        Assert.True(_tabs.Handle(new PipeRequest { Op = "activate" }).Ok);
+        Assert.True(activated);
+        Assert.Contains("Unknown", _tabs.Handle(new PipeRequest { Op = "dance" }).Error);
     }
 
     [Fact]

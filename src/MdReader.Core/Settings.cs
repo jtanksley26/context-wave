@@ -13,9 +13,12 @@ public sealed class Settings
     public string Theme { get; set; } = ThemeCatalog.SystemId;
     public string Highlight { get; set; } = ThemeCatalog.DefaultHighlightId;
     public string Visualizer { get; set; } = VisualizerCatalog.DefaultId;
+    /// <summary>Auto Read: a <see cref="ReplyMode"/>.</summary>
     public string Replies { get; set; } = ReplyMode.Off;
 
-    public string Focus { get; set; } = TabFocus.Stay;
+    /// <summary>When something is playing: a <see cref="Core.WhenPlaying"/>.</summary>
+    public string WhenPlaying { get; set; } = Core.WhenPlaying.Wait;
+
     public int TextSize { get; set; } = TextOptions.DefaultSize;
     public string Font { get; set; } = TextOptions.DefaultFontId;
     public string ColumnWidth { get; set; } = TextOptions.DefaultWidthId;
@@ -34,8 +37,15 @@ public sealed class Settings
                 if (string.IsNullOrEmpty(loaded.Theme)) loaded.Theme = ThemeCatalog.SystemId;
                 if (string.IsNullOrEmpty(loaded.Highlight)) loaded.Highlight = ThemeCatalog.DefaultHighlightId;
                 if (string.IsNullOrEmpty(loaded.Visualizer)) loaded.Visualizer = VisualizerCatalog.DefaultId;
+                // The "Claude's replies" modes this replaced.
+                (loaded.Replies, loaded.WhenPlaying) = loaded.Replies switch
+                {
+                    "switch" => (ReplyMode.Tab, Core.WhenPlaying.Interrupt),
+                    "queue" or "finish" => (ReplyMode.Tab, Core.WhenPlaying.Wait),
+                    _ => (loaded.Replies, loaded.WhenPlaying),
+                };
                 if (string.IsNullOrEmpty(loaded.Replies)) loaded.Replies = ReplyMode.Off;
-                if (string.IsNullOrEmpty(loaded.Focus)) loaded.Focus = TabFocus.Stay;
+                if (string.IsNullOrEmpty(loaded.WhenPlaying)) loaded.WhenPlaying = Core.WhenPlaying.Wait;
                 if (loaded.TextSize <= 0) loaded.TextSize = TextOptions.DefaultSize;
                 if (string.IsNullOrEmpty(loaded.Font)) loaded.Font = TextOptions.DefaultFontId;
                 if (string.IsNullOrEmpty(loaded.ColumnWidth)) loaded.ColumnWidth = TextOptions.DefaultWidthId;

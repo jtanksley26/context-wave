@@ -152,7 +152,7 @@ public static class SetupCommand
             Console.WriteLine(remove
                 ? "Claude Code replies hook: removed. Start a new Claude Code session to apply."
                 : "Claude Code replies hook: installed. Start a new Claude Code session to apply, " +
-                  "then choose a mode under Settings > Claude's replies in Context Wave.");
+                  "then choose a mode under Settings > Auto Read in Context Wave.");
             return 0;
         }
         catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException

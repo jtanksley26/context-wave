@@ -26,26 +26,22 @@ public static class ProcessIdentity
     }
 
     /// <summary>
-    /// For the reply hook: the key of the chat's process, the one its tool bridge reports as its
-    /// parent, in a list of one; empty when it cannot be found. Only that process is sent: the
-    /// processes further up (a terminal, or the desktop app that runs every chat) are shared by
-    /// other chats, and linking them to this chat would send other chats' tool calls to its tab.
+    /// For the reply hook: the key of the chat's process (the parent of its tool bridge), or null.
+    /// Processes further up are shared by other chats, so they would route other chats' calls here.
     /// </summary>
-    public static IReadOnlyList<string> ChatKeys()
+    public static string? ChatKey()
     {
         var processes = ProcessMap();
         var self = Environment.ProcessId;
         var ancestors = new List<int>();
-        var seen = new HashSet<int> { self };
         var child = self;
-        while (ancestors.Count < MaxDepth && processes.TryGetValue(child, out var entry) && seen.Add(entry.Parent)
-               && IsParent(entry.Parent, child))
+        while (ancestors.Count < MaxDepth && processes.TryGetValue(child, out var entry) && IsParent(entry.Parent, child))
         {
             ancestors.Add(entry.Parent);
             child = entry.Parent;
         }
         var exe = Path.GetFileName(Environment.ProcessPath) ?? "";
-        return ChatProcess(ancestors, processes, self, exe) is { } chat ? [KeyOf(chat)] : [];
+        return ChatProcess(ancestors, processes, self, exe) is { } chat ? KeyOf(chat) : null;
     }
 
     // What Claude Code may run a hook through, between the chat and the hook.

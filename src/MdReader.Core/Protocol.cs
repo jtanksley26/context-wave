@@ -27,14 +27,8 @@ public sealed record PipeRequest
     /// <summary>The chat's name as Claude shows it; sent with replies and used for its tab.</summary>
     public string? Name { get; init; }
 
-    /// <summary>The chat's process (<see cref="ProcessIdentity"/>); sent with tool calls.</summary>
+    /// <summary>The chat's process (<see cref="ProcessIdentity"/>), the parent of its tool bridge.</summary>
     public string? Process { get; init; }
-
-    /// <summary>
-    /// Sent with replies: the chat's process, the parent of its tool bridge, or empty when it
-    /// cannot be found.
-    /// </summary>
-    public IReadOnlyList<string>? Processes { get; init; }
 }
 
 public sealed record PipeResult

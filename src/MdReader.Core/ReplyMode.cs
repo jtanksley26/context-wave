@@ -1,59 +1,48 @@
 namespace MdReader.Core;
 
-/// <summary>How the tab in front reads one of Claude's replies when it arrives.</summary>
+/// <summary>Which chats' replies are read aloud by themselves (the "Auto Read" setting).</summary>
 public static class ReplyMode
 {
-    /// <summary>Replies are still added to their chats' tabs, but nothing is read aloud by itself.</summary>
+    /// <summary>Nothing is read by itself: replies are added to their chats' tabs, with a dot.</summary>
     public const string Off = "off";
 
-    /// <summary>A new reply interrupts and is read straight away.</summary>
-    public const string Switch = "switch";
+    /// <summary>Only the chat in front is read; other chats' replies wait in their tabs, with a dot.</summary>
+    public const string Tab = "tab";
 
-    /// <summary>A new reply is read once the one being read has finished.</summary>
-    public const string Queue = "queue";
+    /// <summary>Every chat's replies are read; a chat whose reply is read comes to the front.</summary>
+    public const string All = "all";
 
-    /// <summary>A mode that was dropped; the nearest is Queue, since it never interrupted either.</summary>
-    private const string Finish = "finish";
-
-    /// <summary>The "Claude's replies" menu, in order.</summary>
+    /// <summary>The "Auto Read" menu, in order.</summary>
     public static IReadOnlyList<(string Id, string DisplayName)> Choices { get; } =
     [
         (Off, "Off"),
-        (Switch, "Read the newest right away"),
-        (Queue, "Read after the current one"),
+        (Tab, "This tab"),
+        (All, "All chats"),
     ];
 
-    /// <summary>The id when it is one of the modes, Queue for the old Finish, otherwise Off.</summary>
-    public static string Normalize(string? id) =>
-        id == Finish ? Queue : Choices.Any(c => c.Id == id) ? id! : Off;
+    /// <summary>The id when it is one of the choices, otherwise Off.</summary>
+    public static string Normalize(string? id) => Choices.Any(c => c.Id == id) ? id! : Off;
 }
 
-/// <summary>Whether the app brings another chat's tab to the front when that chat replies.</summary>
-public static class TabFocus
+/// <summary>
+/// What happens when a reply, or a chat's request to read something, arrives while something is
+/// being read (the "When something is playing" setting).
+/// </summary>
+public static class WhenPlaying
 {
-    /// <summary>Never: the reply is added to its tab, which is marked with a dot.</summary>
-    public const string Stay = "stay";
+    /// <summary>Queued: after what is playing in its tab, or when its chat's turn comes.</summary>
+    public const string Wait = "wait";
 
-    /// <summary>
-    /// Once the tab in front has nothing left to read, the chats with unread replies come forward
-    /// one after another, in the order their replies arrived, each read from its first unread reply.
-    /// </summary>
-    public const string Next = "next";
+    /// <summary>It is read at once: what was being read stops where it is, and its chat comes forward.</summary>
+    public const string Interrupt = "interrupt";
 
-    /// <summary>
-    /// The chat that replied comes forward at once and its new reply is read, unless the tab in
-    /// front is reading a file, spoken text or a walkthrough.
-    /// </summary>
-    public const string Newest = "newest";
-
-    /// <summary>The "Tab focus" menu, in order.</summary>
+    /// <summary>The "When something is playing" menu, in order.</summary>
     public static IReadOnlyList<(string Id, string DisplayName)> Choices { get; } =
     [
-        (Stay, "Stay on this tab"),
-        (Next, "Move to the next chat when done"),
-        (Newest, "Jump to the newest"),
+        (Wait, "Wait your turn"),
+        (Interrupt, "Interrupt"),
     ];
 
-    /// <summary>The id when it is one of the choices, otherwise Stay.</summary>
-    public static string Normalize(string? id) => Choices.Any(c => c.Id == id) ? id! : Stay;
+    /// <summary>The id when it is one of the choices, otherwise Wait.</summary>
+    public static string Normalize(string? id) => Choices.Any(c => c.Id == id) ? id! : Wait;
 }

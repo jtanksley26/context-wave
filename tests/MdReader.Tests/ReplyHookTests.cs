@@ -49,18 +49,18 @@ public class ReplyHookTests
     }
 
     [Fact]
-    public async Task Run_sends_the_chats_session_folder_and_processes_with_the_reply()
+    public async Task Run_sends_the_chats_session_folder_and_process_with_the_reply()
     {
         PipeRequest? sent = null;
         await ReplyHook.RunAsync(new StringReader(StopMessage), request =>
         {
             sent = request;
             return Task.FromResult(PipeResponse.Success("ok"));
-        }, transcriptAttempts: 1, transcriptDelayMs: 0, processes: () => ["12@34", "56@78"]);
+        }, transcriptAttempts: 1, transcriptDelayMs: 0, chatProcess: () => "12@34");
 
         Assert.Equal("abc123", sent!.Session);
         Assert.Equal(@"D:\Projects\thing", sent.Folder);
-        Assert.Equal(new[] { "12@34", "56@78" }, sent.Processes);
+        Assert.Equal("12@34", sent.Process);
     }
 
     [Fact]
@@ -70,7 +70,6 @@ public class ReplyHookTests
 
         Assert.NotNull(parent);
         Assert.Matches(@"^\d+@\d+$", parent);
-        Assert.Equal(ProcessIdentity.KeyOf(Environment.ProcessId), ProcessIdentity.KeyOf(Environment.ProcessId));
     }
 
     // The desktop app (1) runs each chat (10, 20) and also starts a bridge of its own (2). The hook

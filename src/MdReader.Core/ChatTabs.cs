@@ -17,7 +17,11 @@ public sealed class ChatTab
         Title = title;
         Session = session;
         Queue = queue;
-        session.DocumentReplaced += html => _html.Clear().Append(html);
+        session.DocumentReplaced += html =>
+        {
+            _html.Clear().Append(html);
+            Replacements++;
+        };
         session.DocumentAppended += html => _html.Append(html);
         session.DiffReplaced += (html, title) =>
         {
@@ -49,6 +53,15 @@ public sealed class ChatTab
     /// <summary>Where the unread part starts, so a chat is read from there and never from halfway.</summary>
     internal int? FirstUnreadId { get; set; }
 
+    /// <summary>
+    /// The chat asked for something to be read (speak, read_file, show_diff) while another tab was
+    /// reading, so it waits its turn whatever Auto Read says.
+    /// </summary>
+    internal bool Requested { get; set; }
+
+    /// <summary>How many times the document has been replaced; sentence ids start again each time.</summary>
+    internal int Replacements { get; private set; }
+
     /// <summary>The document as shown, so it can be put back when the tab is selected again.</summary>
     public string Html => _html.ToString();
 
@@ -68,32 +81,38 @@ public sealed class ChatTabs
     private readonly Func<ReadingQueue> _newQueue;
     private readonly Func<bool> _announceCodeBlocks;
     private readonly Func<bool> _voiceReady;
-    private readonly Func<string> _replyMode;
-    private readonly Func<string> _focus;
+    private readonly Func<string> _autoRead;
+    private readonly Func<string> _whenPlaying;
     private readonly Action<Action> _dispatch;
     private readonly List<ChatTab> _tabs = [];
 
     // A chat's process -> its current session, learned from the processes sent with replies.
     private readonly Dictionary<string, string> _sessionByProcess = [];
 
-    // Background tabs with unread replies, in the order their first unread reply arrived: the
-    // order "Move to the next chat when done" brings them forward.
+    // Background tabs with something unread, in the order it arrived: the order they come forward
+    // in when they wait their turn.
     private readonly List<ChatTab> _line = [];
 
-    /// <param name="replyMode">A <see cref="ReplyMode"/>: how the tab in front reads a new reply.</param>
-    /// <param name="focus">A <see cref="TabFocus"/>: whether another chat's reply brings its tab forward.</param>
+    /// <param name="autoRead">A <see cref="ReplyMode"/> (Auto Read): which chats' replies are read by themselves.</param>
+    /// <param name="whenPlaying">
+    /// A <see cref="WhenPlaying"/>: whether a reply or a chat's request to read something waits for
+    /// what is being read, or interrupts it.
+    /// </param>
     /// <param name="dispatch">Runs a callback on the thread that owns the tabs (the UI thread).</param>
     public ChatTabs(
         Func<ReadingQueue> newQueue, Func<bool> announceCodeBlocks, Func<bool> voiceReady,
-        Func<string> replyMode, Func<string> focus, Action<Action>? dispatch = null)
+        Func<string> autoRead, Func<string> whenPlaying, Action<Action> dispatch)
     {
         _newQueue = newQueue;
         _announceCodeBlocks = announceCodeBlocks;
         _voiceReady = voiceReady;
-        _replyMode = replyMode;
-        _focus = focus;
-        _dispatch = dispatch ?? (action => action());
+        _autoRead = autoRead;
+        _whenPlaying = whenPlaying;
+        _dispatch = dispatch;
     }
+
+    private string AutoRead => ReplyMode.Normalize(_autoRead());
+    private bool Interrupts => WhenPlaying.Normalize(_whenPlaying()) == WhenPlaying.Interrupt;
 
     public IReadOnlyList<ChatTab> Tabs => _tabs;
 
@@ -124,14 +143,10 @@ public sealed class ChatTabs
         }
 
         var existing = ToolTab(request, create: false);
-        // A request that reads something brings its chat to the front, so the one voice reads it.
         if (request.Op is not ("read_file" or "speak" or "show_diff"))
         {
-            // Asking about or stopping a chat that has no tab does not open one, and never reaches
-            // another chat's tab. Only a request that does not say which chat it is from (an older
-            // bridge) goes to the tab in front.
-            var target = existing ?? (request.Process is { Length: > 0 } ? null : Active);
-            if (target is not null) return target.Session.Handle(request);
+            // Status and stop never open a tab or reach another chat's tab.
+            if (existing is not null) return existing.Session.Handle(request);
             return request.Op switch
             {
                 "status" => PipeResponse.Success(new PipeResult
@@ -144,16 +159,27 @@ public sealed class ChatTabs
             };
         }
 
+        // A request that reads something brings its chat to the front, unless it waits its turn.
         var tab = existing ?? ToolTab(request, create: true)!;
         var previous = Active;
-        Select(tab);
+        var wait = !Interrupts && previous is not null && tab != previous && IsPlaying(previous);
+        if (!wait) Select(tab);
 
-        var response = tab.Session.Handle(request);
+        var before = tab.Queue.Count;
+        var replacements = tab.Replacements;
+        var response = tab.Session.Handle(request, hold: wait);
         if (!response.Ok && existing is null && tab.Html.Length == 0 && tab.DiffHtml.Length == 0)
         {
             // Nothing came of it: do not leave an empty tab behind.
             Close(tab);
-            if (previous is not null && _tabs.Contains(previous)) Select(previous);
+            if (!wait && previous is not null && _tabs.Contains(previous)) Select(previous);
+        }
+        else if (wait && response.Ok)
+        {
+            // Read from the request itself, past replies Auto Read left unread, unless those were
+            // due to be read too (All chats). Further requests from the chat follow on from it.
+            MarkWaiting(tab, before, replacements, startHere: !tab.Requested && AutoRead != ReplyMode.All);
+            tab.Requested = true;
         }
         return response;
     }
@@ -191,10 +217,7 @@ public sealed class ChatTabs
         if (changed && Active is { } old) old.Queue.Halt();
         Active = tab;
         var wasUnread = tab.Unread;
-        // Seen now: it no longer waits its turn.
-        tab.Unread = false;
-        tab.FirstUnreadId = null;
-        _line.Remove(tab);
+        MarkSeen(tab);
         if (changed) ActiveChanged?.Invoke(tab);
         if (changed || wasUnread) TabsChanged?.Invoke();
     }
@@ -210,105 +233,103 @@ public sealed class ChatTabs
         if (tab == Active)
         {
             Active = _tabs.Count == 0 ? null : _tabs[Math.Min(index, _tabs.Count - 1)];
-            if (Active is not null)
-            {
-                Active.Unread = false;
-                Active.FirstUnreadId = null;
-                _line.Remove(Active);
-            }
+            if (Active is not null) MarkSeen(Active);
             ActiveChanged?.Invoke(Active);
         }
         TabsChanged?.Invoke();
+    }
+
+    private void MarkSeen(ChatTab tab)
+    {
+        tab.Unread = false;
+        tab.Requested = false;
+        tab.FirstUnreadId = null;
+        _line.Remove(tab);
     }
 
     private string Reply(PipeRequest request)
     {
         // Checked before any tab is opened or brought forward.
         if (ReaderSession.ReplySkipReason(request.Text ?? "", _announceCodeBlocks()) is { } skipped) return skipped;
-        var reading = ReplyMode.Normalize(_replyMode()) != ReplyMode.Off;
-        var focus = TabFocus.Normalize(_focus());
+        var autoRead = AutoRead;
+        var interrupts = Interrupts;
 
         var tab = request.Session is { Length: > 0 } session
-            ? SessionTab(session, request.Folder, request.Name, request.Processes ?? [])
+            ? SessionTab(session, request.Folder, request.Name, request.Process)
             : Find(ClaudeKey) ?? Open(ClaudeKey, "Claude");
         var text = request.Text ?? "";
 
-        string result;
         if (Active is null || tab == Active)
         {
-            // The tab in front reads it as the reply mode says.
             if (Active is null) Select(tab);
-            result = tab.Session.SpeakReply(text);
+            var action = autoRead == ReplyMode.Off ? ReplyAction.Hold
+                : interrupts ? ReplyAction.Interrupt
+                : ReplyAction.Wait;
+            return tab.Session.SpeakReply(text, action);
         }
-        else if (reading && focus == TabFocus.Newest && !ReadingOtherThanReplies(Active))
+
+        if (autoRead == ReplyMode.All && interrupts)
         {
-            // Only the new reply is read; anything older in that tab stays where it is.
             Select(tab);
-            result = tab.Session.SpeakReply(text);
+            return tab.Session.SpeakReply(text, ReplyAction.Interrupt);
         }
-        else
+
+        // Background chat: hold it with a dot; with All chats it is read when its turn comes.
+        var before = tab.Queue.Count;
+        var replacements = tab.Replacements;
+        var result = tab.Session.SpeakReply(text, ReplyAction.Hold);
+        if (tab.Queue.Count != before || tab.Replacements != replacements)
         {
-            var before = tab.Queue.Count;
-            result = tab.Session.SpeakReply(text, hold: true);
-            if (tab.Queue.Count > before)
-            {
-                if (!tab.Unread) tab.FirstUnreadId = tab.Queue.SentenceIdAt(before);
-                tab.Unread = true;
-                if (!_line.Contains(tab)) _line.Add(tab);
-                TabsChanged?.Invoke();
-                // Nothing left to read in front: move on now rather than waiting for a finish.
-                if (reading && focus == TabFocus.Next && IsDone(Active)) MoveToNext();
-            }
+            MarkWaiting(tab, before, replacements);
+            if (autoRead == ReplyMode.All && !IsPlaying(Active)) MoveToNext();
         }
         return result;
     }
 
+    private static bool IsPlaying(ChatTab tab) => tab.Queue.State != ReadingState.Idle;
+
     /// <summary>
-    /// The tab is reading (or paused in) a file, text Claude was asked to speak, or a walkthrough,
-    /// which a reply from another chat never interrupts, even with "Jump to the newest".
+    /// Marks a background tab as having something unread from the sentence at
+    /// <paramref name="before"/> on (or from the start, if its document was replaced), and puts it in line.
     /// </summary>
-    private static bool ReadingOtherThanReplies(ChatTab tab) =>
-        tab.Queue.State != ReadingState.Idle && tab.Session.Source != ReaderSession.ReplySource;
+    /// <param name="startHere">Read from this addition even if older unread sentences come before it.</param>
+    private void MarkWaiting(ChatTab tab, int before, int replacements, bool startHere = false)
+    {
+        if (tab.Replacements != replacements) tab.FirstUnreadId = tab.Queue.SentenceIdAt(0);
+        else if (startHere || !tab.Unread || tab.FirstUnreadId is null) tab.FirstUnreadId = tab.Queue.SentenceIdAt(before);
+        tab.Unread = true;
+        if (!_line.Contains(tab)) _line.Add(tab);
+        TabsChanged?.Invoke();
+    }
 
-    /// <summary>A tab is done when it is not reading and nothing in it is left unread.</summary>
-    private static bool IsDone(ChatTab tab) =>
-        tab.Queue.State == ReadingState.Idle && tab.Queue.CurrentIndex >= tab.Queue.Count;
-
-    /// <summary>Brings the first chat in line forward and reads it from its first unread reply.</summary>
+    /// <summary>Brings forward the first tab in line whose turn it is and reads it from its first unread sentence.</summary>
     private void MoveToNext()
     {
-        while (_line.Count > 0)
-        {
-            var next = _line[0];
-            _line.RemoveAt(0);
-            if (!_tabs.Contains(next) || next == Active || !next.Unread) continue;
-            var start = next.FirstUnreadId;
-            Select(next);
-            if (start is { } id) next.Queue.JumpTo(id);
-            else next.Queue.Play();
-            return;
-        }
+        _line.RemoveAll(t => !_tabs.Contains(t) || t == Active || !t.Unread);
+        var all = AutoRead == ReplyMode.All;
+        var next = _line.FirstOrDefault(t => t.Requested || all);
+        if (next is null) return;
+        var start = next.FirstUnreadId;
+        Select(next);
+        if (start is { } id) next.Queue.JumpTo(id);
+        else next.Queue.Play();
     }
 
     /// <summary>
-    /// The tab for a session, opened if needed. The chat's processes are linked to the session so
-    /// its tool calls find this tab, and a tab its tool calls opened before its first reply becomes
-    /// this tab.
+    /// The tab for a session, opened if needed. A tab the chat's tool calls opened before its first
+    /// reply becomes this tab.
     /// </summary>
-    private ChatTab SessionTab(string session, string? folder, string? name, IReadOnlyList<string> processes)
+    private ChatTab SessionTab(string session, string? folder, string? name, string? process)
     {
-        foreach (var process in processes) _sessionByProcess[process] = session;
+        if (process is { Length: > 0 }) _sessionByProcess[process] = session;
 
         var key = $"session:{session}";
         var tab = Find(key);
-        if (tab is null)
+        if (tab is null && process is { Length: > 0 } && Find($"process:{process}") is { } processTab)
         {
-            tab = processes.Select(process => Find($"process:{process}")).FirstOrDefault(t => t is not null);
-            if (tab is not null)
-            {
-                tab.Key = key;
-                TabsChanged?.Invoke();
-            }
+            processTab.Key = key;
+            tab = processTab;
+            TabsChanged?.Invoke();
         }
         tab ??= Open(key, name is { Length: > 0 } ? name : TitleFor(folder));
         tab.SessionId = session;
@@ -329,26 +350,16 @@ public sealed class ChatTabs
     {
         if (request.Process is { Length: > 0 } process)
         {
-            if (_sessionByProcess.TryGetValue(process, out var session))
+            var session = _sessionByProcess.GetValueOrDefault(process);
+            var key = session is null ? $"process:{process}" : $"session:{session}";
+            var tab = Find(key);
+            if (tab is null && create)
             {
-                var key = $"session:{session}";
-                var tab = Find(key);
-                if (tab is null && create)
-                {
-                    tab = Open(key, TitleFor(request.Folder));
-                    tab.SessionId = session;
-                    tab.Folder = request.Folder;
-                }
-                return tab;
+                tab = Open(key, TitleFor(request.Folder));
+                tab.SessionId = session;
+                tab.Folder = request.Folder;
             }
-            var processKey = $"process:{process}";
-            var processTab = Find(processKey);
-            if (processTab is null && create)
-            {
-                processTab = Open(processKey, TitleFor(request.Folder));
-                processTab.Folder = request.Folder;
-            }
-            return processTab;
+            return tab;
         }
         return Active ?? Find(ClaudeKey) ?? (create ? Open(ClaudeKey, "Claude") : null);
     }
@@ -356,7 +367,7 @@ public sealed class ChatTabs
     private ChatTab Open(string key, string title)
     {
         var queue = _newQueue();
-        var session = new ReaderSession(queue, _announceCodeBlocks, _voiceReady, _replyMode);
+        var session = new ReaderSession(queue, _announceCodeBlocks, _voiceReady);
         var tab = new ChatTab(key, title, session, queue);
         _tabs.Add(tab);
         queue.Finished += () => _dispatch(() => OnFinished(tab));
@@ -365,20 +376,10 @@ public sealed class ChatTabs
         return tab;
     }
 
-    /// <summary>
-    /// With "Move to the next chat when done": when the tab in front stops at the end of what it was
-    /// reading, it first reads anything that arrived in it meanwhile, and only then do the chats in
-    /// line come forward.
-    /// </summary>
+    /// <summary>The next tab in line comes forward once the front tab, and replies queued onto it, are read.</summary>
     private void OnFinished(ChatTab tab)
     {
         if (tab != Active || tab.Queue.State != ReadingState.Idle) return;
-        if (ReplyMode.Normalize(_replyMode()) == ReplyMode.Off || TabFocus.Normalize(_focus()) != TabFocus.Next) return;
-        if (tab.Queue.CurrentIndex < tab.Queue.Count)
-        {
-            tab.Queue.Play();
-            return;
-        }
         MoveToNext();
     }
 

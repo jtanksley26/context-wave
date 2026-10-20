@@ -4,15 +4,6 @@ namespace MdReader.Core;
 
 public sealed class SherpaTtsEngine(ModelStore store) : ITtsEngine, IDisposable
 {
-    /// <summary>
-    /// The fastest the voice models are asked to speak; anything faster comes from
-    /// <see cref="TimeStretch"/>. Above normal speed they shorten each sound in whole steps and cut
-    /// the shortest ones (Kokoro asked for 1.5x gave 1.57x and slurred), and Piper stops getting faster
-    /// past about 1.5x. Stretching speech at its natural speed measured smoother than stretching speech
-    /// the model had already sped up.
-    /// </summary>
-    public const float MaxModelSpeed = 1.0f;
-
     private readonly SemaphoreSlim _gate = new(1, 1);
     private OfflineTts? _tts;
     private string? _loadedModelId;
@@ -28,12 +19,12 @@ public sealed class SherpaTtsEngine(ModelStore store) : ITtsEngine, IDisposable
             {
                 ct.ThrowIfCancellationRequested();
                 var tts = GetOrLoad(voice.ModelId);
-                // Sped up, the models garble speech, so speeding up comes from stretching instead.
-                var modelSpeed = Math.Min(voice.Speed, MaxModelSpeed);
-                var audio = tts.Generate(text, modelSpeed, voice.SpeakerId);
+                // The models garble speech above 1x (Kokoro slurs, Piper stops at about 1.5x), so
+                // faster speeds come from TimeStretch.
+                var audio = tts.Generate(text, Math.Min(voice.Speed, 1f), voice.SpeakerId);
                 try
                 {
-                    var samples = TimeStretch.SpeedUp(audio.Samples, audio.SampleRate, voice.Speed / modelSpeed);
+                    var samples = TimeStretch.SpeedUp(audio.Samples, audio.SampleRate, voice.Speed);
                     return new AudioClip(samples, audio.SampleRate);
                 }
                 finally

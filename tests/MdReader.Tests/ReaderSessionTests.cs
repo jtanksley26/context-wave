@@ -13,13 +13,13 @@ public sealed class ReaderSessionTests : IDisposable
     private readonly List<(string Html, string? Title)> _diffs = [];
     private bool _voiceReady = true;
     private bool _announce = true;
-    private string _replies = "switch";
+    private ReplyAction _action = ReplyAction.Interrupt;
 
     public ReaderSessionTests()
     {
         _queue = new ReadingQueue(
             new FakeTts(), _output, () => new VoiceSettings("m", 0, 1f), (_, _) => Task.CompletedTask);
-        _session = new ReaderSession(_queue, () => _announce, () => _voiceReady, () => _replies);
+        _session = new ReaderSession(_queue, () => _announce, () => _voiceReady);
         _session.DocumentReplaced += _replaced.Add;
         _session.DocumentAppended += _appended.Add;
         _session.DiffReplaced += (html, title) => _diffs.Add((html, title));
@@ -46,8 +46,8 @@ public sealed class ReaderSessionTests : IDisposable
     private PipeResponse ShowDiff(string diff, string? title = null) =>
         _session.Handle(new PipeRequest { Op = "show_diff", Diff = diff, Title = title });
 
-    private PipeResponse Reply(string text) =>
-        _session.Handle(new PipeRequest { Op = "speak_reply", Text = text });
+    /// <summary>A reply, held, waiting or interrupting as <see cref="_action"/> says (the tabs decide which).</summary>
+    private PipeResponse Reply(string text) => PipeResponse.Success(_session.SpeakReply(text, _action));
 
     /// <summary>Lets the sentence in progress finish and waits for the reader to go idle.</summary>
     private async Task FinishReading()
@@ -220,13 +220,8 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
-    public void Activate_raises_the_event_and_unknown_ops_fail()
+    public void Unknown_ops_fail()
     {
-        var activated = false;
-        _session.ActivateRequested += () => activated = true;
-
-        Assert.True(_session.Handle(new PipeRequest { Op = "activate" }).Ok);
-        Assert.True(activated);
         Assert.Contains("Unknown", _session.Handle(new PipeRequest { Op = "dance" }).Error);
     }
 
@@ -486,12 +481,11 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Theory]
-    [InlineData("switch")]
-    [InlineData("queue")]
-    [InlineData("finish")]
-    public void A_reply_is_read_when_the_reader_is_free(string mode)
+    [InlineData(ReplyAction.Interrupt)]
+    [InlineData(ReplyAction.Wait)]
+    public void A_reply_is_read_when_the_reader_is_free(ReplyAction action)
     {
-        _replies = mode;
+        _action = action;
         var response = Reply("One. Two.");
 
         Assert.True(response.Ok, response.Error);
@@ -503,26 +497,24 @@ public sealed class ReaderSessionTests : IDisposable
         Assert.Equal("reply", Status().Source);
     }
 
-    [Theory]
-    [InlineData("off")]
-    [InlineData("loud")]
-    public void With_replies_off_or_unknown_a_reply_is_added_but_not_read(string mode)
+    [Fact]
+    public void A_held_reply_is_added_but_not_read()
     {
-        _replies = mode;
+        _action = ReplyAction.Hold;
         var response = Reply("One.");
 
         Assert.True(response.Ok);
-        Assert.Contains("off", response.Result!.Message);
+        Assert.Contains("without reading", response.Result!.Message);
         Assert.Equal(1, _queue.Count);
         Assert.Equal(ReadingState.Idle, _queue.State);
         Assert.Single(_replaced);
     }
 
     [Fact]
-    public void With_replies_off_a_reply_does_not_interrupt_one_being_read()
+    public void A_held_reply_does_not_interrupt_one_being_read()
     {
         Reply("One.");
-        _replies = "off";
+        _action = ReplyAction.Hold;
         Reply("Two.");
 
         Assert.Equal(2, _queue.Count);
@@ -530,7 +522,7 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
-    public async Task Switch_jumps_to_the_new_reply_and_keeps_the_earlier_one()
+    public async Task Interrupt_jumps_to_the_new_reply_and_keeps_the_earlier_one()
     {
         Reply("One.");
         var response = Reply("Two. Three.");
@@ -543,9 +535,9 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
-    public void Queue_appends_after_the_reply_being_read()
+    public void Wait_appends_after_the_reply_being_read()
     {
-        _replies = "queue";
+        _action = ReplyAction.Wait;
         Reply("One.");
         var response = Reply("Two.");
 
@@ -557,9 +549,9 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
-    public void Queue_appends_while_the_reply_is_paused_and_stays_paused()
+    public void Wait_appends_while_the_reply_is_paused_and_stays_paused()
     {
-        _replies = "queue";
+        _action = ReplyAction.Wait;
         Reply("One.");
         _queue.Pause();
         Reply("Two.");
@@ -572,7 +564,7 @@ public sealed class ReaderSessionTests : IDisposable
     public async Task A_held_reply_stops_reading_before_it_and_Play_reads_it()
     {
         Reply("One.");
-        _replies = "off";
+        _action = ReplyAction.Hold;
         Reply("Two.");
         await FinishReading();
 
@@ -582,11 +574,11 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Theory]
-    [InlineData("switch")]
-    [InlineData("queue")]
-    public async Task A_reply_after_the_last_one_has_finished_is_added_and_read(string mode)
+    [InlineData(ReplyAction.Interrupt)]
+    [InlineData(ReplyAction.Wait)]
+    public async Task A_reply_after_the_last_one_has_finished_is_added_and_read(ReplyAction action)
     {
-        _replies = mode;
+        _action = action;
         Reply("One.");
         await FinishReading();
         var response = Reply("Two. Three.");
@@ -599,27 +591,38 @@ public sealed class ReaderSessionTests : IDisposable
         Assert.Equal(1, _queue.CurrentIndex);
     }
 
-    [Theory]
-    [InlineData("switch")]
-    [InlineData("queue")]
-    public void A_reply_never_interrupts_text_claude_was_asked_to_speak(string mode)
+    [Fact]
+    public async Task With_wait_a_reply_is_read_after_text_claude_was_asked_to_speak()
     {
-        _replies = mode;
+        _action = ReplyAction.Wait;
         Speak("Hello there.");
         var response = Reply("Done.");
 
-        Assert.True(response.Ok);
-        Assert.Contains("something else", response.Result!.Message);
+        Assert.StartsWith("Queued the reply", response.Result!.Message);
         Assert.Equal("stream", _session.Source);
         Assert.Equal(2, _queue.Count);
         Assert.Equal(0, _queue.CurrentIndex);
-        Assert.Single(_replaced);
         Assert.Single(_appended);
+        await FinishReading();
+        Assert.Equal(2, _queue.CurrentIndex);
     }
 
     [Fact]
-    public void A_reply_never_interrupts_a_file_even_when_it_is_paused()
+    public void With_interrupt_a_reply_cuts_off_text_claude_was_asked_to_speak()
     {
+        Speak("Hello there. More to say.");
+        var response = Reply("Done.");
+
+        Assert.StartsWith("Reading the reply", response.Result!.Message);
+        Assert.Equal(3, _queue.Count);
+        Assert.Equal(2, _queue.CurrentIndex);
+        Assert.Equal(ReadingState.Playing, _queue.State);
+    }
+
+    [Fact]
+    public void With_wait_a_reply_waits_behind_a_paused_file()
+    {
+        _action = ReplyAction.Wait;
         var path = Write("a.md", "One. Two.");
         ReadFile(path);
         _queue.Pause();
@@ -632,28 +635,27 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
-    public void A_reply_is_not_read_ahead_of_a_file_that_was_loaded_but_never_read()
+    public void With_wait_and_nothing_playing_a_reply_is_read_now_even_after_text_never_read()
     {
+        _action = ReplyAction.Wait;
         _voiceReady = false;
         var path = Write("a.md", "One. Two.");
         _session.OpenFile(path);
         _voiceReady = true;
         var response = Reply("Done.");
 
-        Assert.True(response.Ok, response.Error);
-        Assert.Contains("something else", response.Result!.Message);
-        Assert.Equal(path, _session.Source);
+        Assert.StartsWith("Reading the reply", response.Result!.Message);
         Assert.Equal(3, _queue.Count);
-        Assert.Equal(ReadingState.Idle, _queue.State);
-        Assert.Equal(0, _queue.CurrentIndex);
+        Assert.Equal(2, _queue.CurrentIndex);
+        Assert.Equal(ReadingState.Playing, _queue.State);
     }
 
     [Fact]
-    public void A_held_reply_is_added_without_reading_it()
+    public void A_held_reply_after_a_halt_is_added_without_reading_it()
     {
         Reply("One.");
         _queue.Halt();
-        var response = _session.SpeakReply("Two.", hold: true);
+        var response = _session.SpeakReply("Two.", ReplyAction.Hold);
 
         Assert.Contains("without reading", response);
         Assert.Equal(2, _queue.Count);
@@ -678,7 +680,7 @@ public sealed class ReaderSessionTests : IDisposable
     [Fact]
     public void A_reply_with_nothing_to_read_is_not_queued()
     {
-        _replies = "queue";
+        _action = ReplyAction.Wait;
         Reply("One. Two.");
         _announce = false;
         var response = Reply("~~~\ncode\n~~~");

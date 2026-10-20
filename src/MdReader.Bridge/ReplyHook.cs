@@ -22,15 +22,12 @@ public static class ReplyHook
         string? Message, string? TranscriptPath, string? SessionId, string? Folder, string Fields);
 
     public static Task<int> RunAsync(TextReader input, Func<PipeRequest, Task<PipeResponse>> send) =>
-        RunAsync(input, send, transcriptAttempts: 6, transcriptDelayMs: 300, ProcessIdentity.ChatKeys);
+        RunAsync(input, send, transcriptAttempts: 6, transcriptDelayMs: 300, ProcessIdentity.ChatKey);
 
-    /// <param name="processes">
-    /// The chat's own process, which is also the parent of the chat's tool bridge; Context Wave
-    /// uses it to send the chat's tool calls to the same tab.
-    /// </param>
+    /// <param name="chatProcess">The chat's process, so Context Wave can put its tool calls in the same tab.</param>
     public static async Task<int> RunAsync(
         TextReader input, Func<PipeRequest, Task<PipeResponse>> send, int transcriptAttempts, int transcriptDelayMs,
-        Func<IReadOnlyList<string>>? processes = null)
+        Func<string?>? chatProcess = null)
     {
         try
         {
@@ -54,7 +51,7 @@ public static class ReplyHook
                 Session = stop.SessionId,
                 Folder = stop.Folder,
                 Name = string.IsNullOrWhiteSpace(stop.TranscriptPath) ? null : ChatName(ReadTail(stop.TranscriptPath)),
-                Processes = processes?.Invoke(),
+                Process = chatProcess?.Invoke(),
             });
             // A skipped reply is a success to the hook, so the app's own explanation is the only trace of why.
             FileLog.Write($"reply-hook: {(response.Ok ? response.Result?.Message : response.Error)}");

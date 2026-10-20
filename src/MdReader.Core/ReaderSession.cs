@@ -7,8 +7,20 @@ public sealed class ReaderException(string message) : Exception(message);
 /// <param name="FocusProblem">Why the focus could not be linked to the diff, or null.</param>
 public sealed record SpeakResult(int Count, string? FocusProblem);
 
-public sealed class ReaderSession(
-    ReadingQueue queue, Func<bool> announceCodeBlocks, Func<bool> voiceReady, Func<string>? replyMode = null)
+/// <summary>What to do with one of Claude's replies once it is added to the document.</summary>
+public enum ReplyAction
+{
+    /// <summary>Add it without reading it.</summary>
+    Hold,
+
+    /// <summary>Read it after whatever is being read, or now when nothing is.</summary>
+    Wait,
+
+    /// <summary>Read it now, stopping whatever is being read.</summary>
+    Interrupt,
+}
+
+public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlocks, Func<bool> voiceReady)
 {
     public const long MaxFileBytes = 5 * 1024 * 1024;
     public const int MaxDiffBytes = 2 * 1024 * 1024;
@@ -41,9 +53,12 @@ public sealed class ReaderSession(
 
     /// <summary>The diff HTML and title; "" and null when the diff is unloaded.</summary>
     public event Action<string, string?>? DiffReplaced;
-    public event Action? ActivateRequested;
 
-    public PipeResponse Handle(PipeRequest request)
+    /// <param name="hold">
+    /// Load what a read_file or speak asks for without starting to read it: the tab is in the
+    /// background, waiting its turn.
+    /// </param>
+    public PipeResponse Handle(PipeRequest request, bool hold = false)
     {
         try
         {
@@ -51,28 +66,23 @@ public sealed class ReaderSession(
             {
                 case "read_file":
                     RequireVoice();
-                    OpenFile(request.Path ?? "");
-                    return PipeResponse.Success($"Reading {Path.GetFileName(Source)} ({queue.Count} sentences).");
+                    OpenFile(request.Path ?? "", hold);
+                    return PipeResponse.Success(
+                        $"{(hold ? "Waiting to read" : "Reading")} {Path.GetFileName(Source)} ({queue.Count} sentences).");
                 case "speak":
                     RequireVoice();
-                    var spoken = Speak(request.Text ?? "", request.Mode ?? "append", request.Focus);
-                    var queued = $"Queued {spoken.Count} sentences.";
+                    var spoken = Speak(request.Text ?? "", request.Mode ?? "append", request.Focus, hold);
+                    var queued = $"Queued {spoken.Count} sentences{(hold ? " to read when this chat's turn comes" : "")}.";
                     return PipeResponse.Success(
                         spoken.FocusProblem is null ? queued : $"{queued} {spoken.FocusProblem}");
                 case "show_diff":
                     var files = ShowDiff(request.Diff ?? "", request.Title);
                     return PipeResponse.Success($"Showing diff: {files} {(files == 1 ? "file" : "files")}.");
-                case "speak_reply":
-                    // Always a success: a skipped reply is normal, and the hook must not see an error.
-                    return PipeResponse.Success(SpeakReply(request.Text ?? ""));
                 case "stop":
                     Stop();
                     return PipeResponse.Success("Stopped.");
                 case "status":
                     return PipeResponse.Success(Status());
-                case "activate":
-                    ActivateRequested?.Invoke();
-                    return PipeResponse.Success("Activated.");
                 default:
                     return PipeResponse.Fail($"Unknown operation '{request.Op}'.");
             }
@@ -87,7 +97,7 @@ public sealed class ReaderSession(
         }
     }
 
-    public void OpenFile(string path)
+    public void OpenFile(string path, bool hold = false)
     {
         if (!Path.IsPathFullyQualified(path)) throw new ReaderException($"Path must be absolute: {path}");
         var extension = Path.GetExtension(path);
@@ -114,10 +124,10 @@ public sealed class ReaderSession(
         }
 
         ClearDiff();
-        Replace(text, path);
+        Replace(text, path, hold);
     }
 
-    public SpeakResult Speak(string text, string mode, string? focus = null)
+    public SpeakResult Speak(string text, string mode, string? focus = null, bool hold = false)
     {
         if (mode is not ("append" or "replace"))
             throw new ReaderException($"Unknown mode '{mode}'. Use 'append' or 'replace'.");
@@ -131,7 +141,6 @@ public sealed class ReaderSession(
             else anchor = _diff.Resolve(focus, out problem);
         }
 
-        // Appending to a chat's replies keeps them: a tab is the running record of that chat.
         var replace = mode == "replace" || Source == "";
         if (replace)
         {
@@ -151,52 +160,38 @@ public sealed class ReaderSession(
         {
             Source = "stream";
             DocumentReplaced?.Invoke(html);
-            queue.Load(result.Sentences, voiceReady());
+            queue.Load(result.Sentences, voiceReady() && !hold);
         }
         else
         {
-            // Text Claude was asked to speak is never cut off by a reply, even when it follows replies.
             if (Source == ReplySource) Source = "stream";
             DocumentAppended?.Invoke(html);
-            queue.Append(result.Sentences, voiceReady());
+            queue.Append(result.Sentences, voiceReady() && !hold);
         }
         return new SpeakResult(result.Sentences.Count, problem);
     }
 
     /// <summary>
-    /// Adds one of Claude's replies to the end of the document, which keeps the chat's earlier
-    /// replies, and reads it if the mode and the reader's state allow. A file or a speak stream is
-    /// never interrupted: the reply waits after it. During a walkthrough the reply is skipped while
-    /// the walkthrough is still to be read, and replaces it once it has been. Switch jumps to the new reply,
-    /// Queue reads it after the reply being read, and Off only adds it.
+    /// Appends one of Claude's replies and holds, queues or reads it as <paramref name="action"/> says.
+    /// Skipped while a walkthrough is still to be read; replaces the walkthrough once it has been.
     /// </summary>
-    /// <param name="hold">Add the reply without reading it, whatever the mode (a tab in the background).</param>
     /// <returns>What happened, for the caller's log.</returns>
-    public string SpeakReply(string text, bool hold = false)
+    public string SpeakReply(string text, ReplyAction action)
     {
-        var mode = ReplyMode.Normalize(replyMode?.Invoke());
         if (ReplySkipReason(text, announceCodeBlocks()) is { } skipped) return skipped;
 
         var busy = queue.State != ReadingState.Idle;
-        // A document that was loaded but not played (opened without the voice) is unread, not free.
-        // After a document finishes, CurrentIndex is the sentence count.
-        var unread = queue.CurrentIndex < queue.Count;
         if (_diff is not null)
         {
-            // A reply is never mixed into a walkthrough: it is skipped while the walkthrough is
-            // still to be read, and takes its place once it has been.
-            if (busy || unread) return "Skipped: a walkthrough is showing.";
+            // A document that was loaded but not played (opened without the voice) is unread, not free.
+            // After a document finishes, CurrentIndex is the sentence count.
+            if (busy || queue.CurrentIndex < queue.Count) return "Skipped: a walkthrough is showing.";
             queue.Stop();
             ClearDiff();
             _document = new MarkdownDocument(announceCodeBlocks());
             Source = "";
         }
-        var other = Source is not ("" or ReplySource) && (busy || unread);
-        string? wait = hold ? ""
-            : mode == ReplyMode.Off ? ": reading replies is off"
-            : !voiceReady() ? ": the voice is not ready"
-            : other ? ": something else is being read"
-            : null;
+        var voiceMissing = action != ReplyAction.Hold && !voiceReady();
 
         var first = _document.Html.Length == 0;
         var added = _document.Append(text);
@@ -206,13 +201,14 @@ public sealed class ReaderSession(
         if (first) DocumentReplaced?.Invoke(added.Html);
         else DocumentAppended?.Invoke($"<hr>{added.Html}");
 
-        if (wait is not null)
+        if (action == ReplyAction.Hold || voiceMissing)
         {
             queue.Append(added.Sentences, autoPlay: false, holdBack: true);
-            return $"Added the reply ({count} sentences) without reading it{wait}.";
+            return $"Added the reply ({count} sentences) without reading it{(voiceMissing ? ": the voice is not ready" : "")}.";
         }
-        if (busy && mode == ReplyMode.Queue)
+        if (busy && action == ReplyAction.Wait)
         {
+            // Reading carries on into it; paused, it stays paused.
             queue.Append(added.Sentences);
             return $"Queued the reply ({count} sentences) after the current one.";
         }
@@ -302,13 +298,13 @@ public sealed class ReaderSession(
         };
     }
 
-    private int Replace(string markdown, string source)
+    private int Replace(string markdown, string source, bool hold)
     {
         _document = new MarkdownDocument(announceCodeBlocks());
         var result = _document.Append(markdown);
         Source = source;
         DocumentReplaced?.Invoke(result.Html);
-        queue.Load(result.Sentences, voiceReady());
+        queue.Load(result.Sentences, voiceReady() && !hold);
         return result.Sentences.Count;
     }
 

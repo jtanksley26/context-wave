@@ -1,15 +1,9 @@
 namespace MdReader.Core;
 
-/// <summary>
-/// Speeds speech up without changing its pitch. Used for every speed above normal: asked to speak
-/// fast, the voice models shorten each sound to a whole number of steps, and the shortest sounds are
-/// cut until words slur.
-/// </summary>
+/// <summary>Speeds speech up without changing its pitch.</summary>
 /// <remarks>
-/// SOLA, as SoundTouch does it for speech: long pieces of the input are copied as they are, and each
-/// is joined to the one before with a short crossfade, at the offset near its place where the two line
-/// up best. Few joins, each between waves in step, keep it smooth; overlapping many short windows
-/// instead (WSOLA) measured two to three times the brief dips in loudness, heard as blips.
+/// SOLA, as SoundTouch does it for speech: long pieces of the input are copied as they are, each
+/// joined to the one before with a short crossfade at the offset where the two line up best.
 /// </remarks>
 public static class TimeStretch
 {
@@ -44,10 +38,8 @@ public static class TimeStretch
             end = start + piece;
         }
 
-        // What is left after the last piece is sped up too, by one last join that ends exactly at the
-        // end of the input, so the last sound is whole and the sentence does not slow down at the end.
-        // Sized by the output still owed: the input read so far runs behind where a perfectly even
-        // stretch would be, since each piece is taken ahead of where it is written.
+        // A last join that ends exactly at the input's end, so the last sound is whole. Sized by the
+        // output still owed, since the input read so far runs behind an even stretch.
         var owed = length - output.Count;
         var last = input.Length - owed;
         if (owed >= crossfade && last > end - crossfade)

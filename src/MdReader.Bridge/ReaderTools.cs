@@ -75,7 +75,6 @@ public sealed class ReaderTools(AppLink link)
         PipeResponse response;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(ReplyTimeout);
-        // Tells Context Wave which chat's tab the call belongs to.
         request = request with { Process = ChatProcess.Value, Folder = Environment.CurrentDirectory };
         try
         {

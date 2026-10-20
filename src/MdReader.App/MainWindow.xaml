@@ -25,8 +25,8 @@
                 <MenuItem x:Name="AnnounceCodeItem" Header="Announce _code blocks"
                           IsCheckable="True" Click="OnAnnounceClick" />
                 <Separator />
-                <MenuItem x:Name="RepliesMenu" Header="Claude's _replies" />
-                <MenuItem x:Name="FocusMenu" Header="Tab _focus" />
+                <MenuItem x:Name="RepliesMenu" Header="_Auto Read" />
+                <MenuItem x:Name="WhenPlayingMenu" Header="_When something is playing" />
             </MenuItem>
         </Menu>
 
