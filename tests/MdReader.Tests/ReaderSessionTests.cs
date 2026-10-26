@@ -93,6 +93,14 @@ public sealed class ReaderSessionTests : IDisposable
     }
 
     [Fact]
+    public void OpenFile_embeds_images_beside_the_file()
+    {
+        File.WriteAllBytes(Path.Combine(_dir, "cat.png"), [1, 2, 3]);
+        _session.OpenFile(Write("a.md", "![A cat](cat.png)"));
+        Assert.Contains("src=\"data:image/png;base64,AQID\"", Assert.Single(_replaced));
+    }
+
+    [Fact]
     public void OpenFile_with_an_invalid_path_throws_ReaderException()
     {
         Assert.Throws<ReaderException>(() => _session.OpenFile("C:\\a\0.md"));

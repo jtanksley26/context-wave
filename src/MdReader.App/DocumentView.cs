@@ -42,6 +42,7 @@ public sealed class DocumentView(WebView2 webView)
           .diagram svg { vertical-align:top; }
           /* Where mermaid measures a diagram as it draws it: out of the layout, so the text does not move. */
           #scratch { position:fixed; left:0; top:0; width:100%; visibility:hidden; pointer-events:none; }
+          img { max-width:100%; height:auto; }
           table { border-collapse:collapse; }
           th, td { border:1px solid var(--line); padding:4px 10px; }
           blockquote { border-left:4px solid var(--line); margin-left:0; padding-left:16px; }
