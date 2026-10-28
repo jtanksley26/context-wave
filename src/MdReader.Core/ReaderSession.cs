@@ -184,8 +184,9 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         if (_diff is not null)
         {
             // A document that was loaded but not played (opened without the voice) is unread, not free.
-            // After a document finishes, CurrentIndex is the sentence count.
-            if (busy || queue.CurrentIndex < queue.Count) return "Skipped: a walkthrough is showing.";
+            // After a document finishes, CurrentIndex is the sentence count. A diff nobody has
+            // narrated yet has no sentences at all, and is still to be read too.
+            if (busy || queue.Count == 0 || queue.CurrentIndex < queue.Count) return "Skipped: a walkthrough is showing.";
             queue.Stop();
             ClearDiff();
             _document = new MarkdownDocument(announceCodeBlocks());

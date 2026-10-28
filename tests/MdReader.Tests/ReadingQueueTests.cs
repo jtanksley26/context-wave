@@ -445,6 +445,26 @@ public class ReadingQueueTests
     }
 
     [Fact]
+    public async Task Sentences_added_after_held_ones_are_still_read()
+    {
+        _output.Manual = true;
+        var queue = Create();
+        queue.Load(Make(1));
+        await TestUtil.WaitUntil(() => _output.Pending);
+
+        queue.Append(Make(1, firstId: 1), holdBack: true);
+        queue.Append(Make(1, firstId: 2));
+        var finished = NextFinished(queue);
+        while (!finished.IsCompleted)
+        {
+            _output.Release();
+            await Task.Delay(10);
+        }
+
+        Assert.Equal(new[] { 0, 2 }, _started);
+    }
+
+    [Fact]
     public void Held_sentences_on_an_idle_queue_wait_where_reading_stopped()
     {
         var queue = Create();

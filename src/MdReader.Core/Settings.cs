@@ -37,11 +37,11 @@ public sealed class Settings
                 if (string.IsNullOrEmpty(loaded.Theme)) loaded.Theme = ThemeCatalog.SystemId;
                 if (string.IsNullOrEmpty(loaded.Highlight)) loaded.Highlight = ThemeCatalog.DefaultHighlightId;
                 if (string.IsNullOrEmpty(loaded.Visualizer)) loaded.Visualizer = VisualizerCatalog.DefaultId;
-                // The "Claude's replies" modes this replaced.
+                // The "Claude's replies" modes this replaced. None of them ever cut off a file or
+                // a speak stream, which Interrupt does, so all of them wait.
                 (loaded.Replies, loaded.WhenPlaying) = loaded.Replies switch
                 {
-                    "switch" => (ReplyMode.Tab, Core.WhenPlaying.Interrupt),
-                    "queue" or "finish" => (ReplyMode.Tab, Core.WhenPlaying.Wait),
+                    "switch" or "queue" or "finish" => (ReplyMode.Tab, Core.WhenPlaying.Wait),
                     _ => (loaded.Replies, loaded.WhenPlaying),
                 };
                 if (string.IsNullOrEmpty(loaded.Replies)) loaded.Replies = ReplyMode.Off;

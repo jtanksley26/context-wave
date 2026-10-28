@@ -26,8 +26,9 @@ public sealed class ReadingQueue
     // single-sentence appends still count towards one streak.
     private int _failStreak;
     private int _failStreakStart;
-    // Reading stops before this index: sentences appended with holdBack wait for Play or a jump.
-    private int? _holdAt;
+    // Positions of sentences appended with holdBack: they wait for Play or a jump. Reading in
+    // progress stops at them, or skips them when other sentences were appended after them.
+    private readonly HashSet<int> _held = [];
 
     public ReadingQueue(
         ITtsEngine tts,
@@ -84,7 +85,8 @@ public sealed class ReadingQueue
             _sentences.AddRange(sentences);
             if (holdBack)
             {
-                if (_state != ReadingState.Idle) _holdAt ??= firstNew;
+                if (_state != ReadingState.Idle)
+                    for (var k = firstNew; k < _sentences.Count; k++) _held.Add(k);
             }
             else if (autoPlay && _state == ReadingState.Idle)
             {
@@ -156,7 +158,7 @@ public sealed class ReadingQueue
         {
             if (_state == ReadingState.Idle) return;
             CancelRunLocked();
-            _holdAt = null;
+            _held.Clear();
             _state = ReadingState.Idle;
         }
         RaiseState();
@@ -232,7 +234,7 @@ public sealed class ReadingQueue
         _index = 0;
         _failStreak = 0;
         _failStreakStart = 0;
-        _holdAt = null;
+        _held.Clear();
         _state = ReadingState.Idle;
     }
 
@@ -260,7 +262,7 @@ public sealed class ReadingQueue
         CancelRunLocked();
         DropStaleClipsLocked(index);
         // A deliberate start (Play, a jump, a move) reads on through anything that was held back.
-        _holdAt = null;
+        _held.Clear();
         _runCts = new CancellationTokenSource();
         var ct = _runCts.Token;
         _index = index;
@@ -330,10 +332,16 @@ public sealed class ReadingQueue
             lock (_gate)
             {
                 if (ct.IsCancellationRequested) return;
-                if (i >= _sentences.Count || i >= _holdAt)
+                if (_held.Contains(i))
+                {
+                    var after = i;
+                    while (_held.Contains(after)) after++;
+                    if (after < _sentences.Count) i = after;
+                }
+                if (i >= _sentences.Count || _held.Contains(i))
                 {
                     _index = Math.Min(i, _sentences.Count);
-                    _holdAt = null;
+                    _held.Clear();
                     _state = ReadingState.Idle;
                     _runCts = null;
                 }

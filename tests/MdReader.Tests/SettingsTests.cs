@@ -122,7 +122,7 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Theory]
-    [InlineData("switch", "tab", "interrupt")]
+    [InlineData("switch", "tab", "wait")]
     [InlineData("queue", "tab", "wait")]
     [InlineData("finish", "tab", "wait")]
     [InlineData("off", "off", "wait")]
