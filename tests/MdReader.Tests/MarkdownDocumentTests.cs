@@ -86,6 +86,71 @@ public class MarkdownDocumentTests
         Assert.Equal(new[] { "A cat" }, Spoken(Parse("![A cat](cat.png)")));
 
     [Fact]
+    public void Relative_image_is_embedded_from_the_document_folder()
+    {
+        var dir = Directory.CreateTempSubdirectory("mdreader-images-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "my images"));
+            File.WriteAllBytes(Path.Combine(dir, "my images", "cat.png"), [1, 2, 3]);
+            var doc = new MarkdownDocument(imageFolder: dir);
+            doc.Append("![A cat](my%20images/cat.png?v=1)");
+
+            Assert.Contains("src=\"data:image/png;base64,AQID\"", doc.Html);
+            Assert.Contains("alt=\"A cat\"", doc.Html);
+            Assert.Equal(new[] { "A cat" }, Spoken(doc));
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Image_in_a_parent_folder_is_embedded()
+    {
+        var dir = Directory.CreateTempSubdirectory("mdreader-images-").FullName;
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(dir, "docs"));
+            File.WriteAllText(Path.Combine(dir, "flow.svg"), "<svg/>");
+            var doc = new MarkdownDocument(imageFolder: Path.Combine(dir, "docs"));
+            doc.Append("![Flow](../flow.svg)");
+
+            Assert.Contains("src=\"data:image/svg+xml;base64,PHN2Zy8+\"", doc.Html);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("![x](missing.png)", "missing.png")]
+    [InlineData("![x](notes.txt)", "notes.txt")]
+    [InlineData("![x](https://example.com/cat.png)", "https://example.com/cat.png")]
+    public void Images_that_cannot_be_embedded_keep_their_url(string markdown, string url)
+    {
+        var dir = Directory.CreateTempSubdirectory("mdreader-images-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(dir, "notes.txt"), "not an image");
+            var doc = new MarkdownDocument(imageFolder: dir);
+            doc.Append(markdown);
+
+            Assert.Contains($"src=\"{url}\"", doc.Html);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Images_are_not_embedded_without_a_document_folder() =>
+        Assert.Contains("src=\"cat.png\"", Parse("![A cat](cat.png)").Html);
+
+    [Fact]
     public void List_items_get_the_list_pause()
     {
         var doc = Parse("- First item.\n- Second item.");

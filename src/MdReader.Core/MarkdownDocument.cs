@@ -12,8 +12,25 @@ public sealed record Sentence(int Id, string SpokenText, int PauseAfterMs);
 
 public sealed record AppendResult(IReadOnlyList<Sentence> Sentences, string Html);
 
-public sealed class MarkdownDocument(bool announceCodeBlocks = true)
+/// <param name="imageFolder">
+/// The folder of the file being read. Images with a relative path are resolved against it and
+/// embedded, since the page allows no image source but data URIs. Null leaves them as they are.
+/// </param>
+public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? imageFolder = null)
 {
+    public const long MaxImageBytes = 2 * 1024 * 1024;
+
+    private static readonly Dictionary<string, string> ImageTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        [".png"] = "image/png",
+        [".jpg"] = "image/jpeg",
+        [".jpeg"] = "image/jpeg",
+        [".gif"] = "image/gif",
+        [".webp"] = "image/webp",
+        [".bmp"] = "image/bmp",
+        [".svg"] = "image/svg+xml",
+    };
+
     private static readonly MarkdownPipeline Pipeline = new MarkdownPipelineBuilder()
         .UsePipeTables()
         .UseAutoLinks()
@@ -59,12 +76,15 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true)
         return new AppendResult(added, html);
     }
 
-    private static void SanitizeLinks(MarkdownObject root)
+    private void SanitizeLinks(MarkdownObject root)
     {
         foreach (var node in root.Descendants())
         {
             switch (node)
             {
+                case LinkInline { IsImage: true } image when EmbedImage(image.Url) is { } data:
+                    image.Url = data;
+                    break;
                 case LinkInline link when !IsSafeUrl(link.Url):
                     link.Url = "";
                     break;
@@ -85,6 +105,30 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true)
         return scheme.Equals("http", StringComparison.OrdinalIgnoreCase)
             || scheme.Equals("https", StringComparison.OrdinalIgnoreCase)
             || scheme.Equals("mailto", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>The image at a relative path as a data URI, or null when it cannot or should not be embedded.</summary>
+    private string? EmbedImage(string? url)
+    {
+        if (imageFolder is null || string.IsNullOrWhiteSpace(url)) return null;
+        var path = url.Trim();
+        var end = path.IndexOfAny(['?', '#']);
+        if (end >= 0) path = path[..end];
+        try
+        {
+            path = Uri.UnescapeDataString(path);
+            // Only paths relative to the document; anything with a scheme or a root is left alone.
+            if (path.Contains(':') || Path.IsPathRooted(path)) return null;
+            if (!ImageTypes.TryGetValue(Path.GetExtension(path), out var type)) return null;
+            var info = new FileInfo(Path.GetFullPath(Path.Combine(imageFolder, path)));
+            if (!info.Exists || info.Length > MaxImageBytes) return null;
+            return $"data:{type};base64,{Convert.ToBase64String(File.ReadAllBytes(info.FullName))}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
+                                       or NotSupportedException or System.Security.SecurityException)
+        {
+            return null;
+        }
     }
 
     private void Visit(Block block, List<Sentence> added, Dictionary<Inline, List<SpanPiece>> pieces, bool inListItem)

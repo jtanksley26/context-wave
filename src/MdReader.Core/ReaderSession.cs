@@ -301,7 +301,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
 
     private int Replace(string markdown, string source, bool hold)
     {
-        _document = new MarkdownDocument(announceCodeBlocks());
+        _document = new MarkdownDocument(announceCodeBlocks(), Path.GetDirectoryName(source));
         var result = _document.Append(markdown);
         Source = source;
         DocumentReplaced?.Invoke(result.Html);
