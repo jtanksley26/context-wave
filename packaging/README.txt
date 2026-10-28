@@ -35,7 +35,7 @@ Connect Claude later, or disconnect
     "%LOCALAPPDATA%\Programs\MdReader\bridge\MdReader.Bridge.exe" setup --remove
 
 Restart Claude afterwards. Reading Claude's replies aloud is off until you choose a mode
-under Settings > Claude's replies in Context Wave.
+under Settings > Auto Read in Context Wave.
 
 Uninstall
 ---------
@@ -46,3 +46,6 @@ settings.
 Requirements
 ------------
 Windows 10 or 11, 64-bit.
+
+---
+Last updated: 2026-10-14 by Drew Smith - renamed the "Claude's replies" setting to "Auto Read"

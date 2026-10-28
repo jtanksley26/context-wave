@@ -49,6 +49,68 @@ public class ReplyHookTests
     }
 
     [Fact]
+    public async Task Run_sends_the_chats_session_folder_and_process_with_the_reply()
+    {
+        PipeRequest? sent = null;
+        await ReplyHook.RunAsync(new StringReader(StopMessage), request =>
+        {
+            sent = request;
+            return Task.FromResult(PipeResponse.Success("ok"));
+        }, transcriptAttempts: 1, transcriptDelayMs: 0, chatProcess: () => "12@34");
+
+        Assert.Equal("abc123", sent!.Session);
+        Assert.Equal(@"D:\Projects\thing", sent.Folder);
+        Assert.Equal("12@34", sent.Process);
+    }
+
+    [Fact]
+    public void ProcessIdentity_names_this_process_parent()
+    {
+        var parent = ProcessIdentity.ParentKey();
+
+        Assert.NotNull(parent);
+        Assert.Matches(@"^\d+@\d+$", parent);
+    }
+
+    // The desktop app (1) runs each chat (10, 20) and also starts a bridge of its own (2). The hook
+    // (99) runs under a shell (50) under chat 10, whose bridge is 11.
+    private static readonly Dictionary<int, (int Parent, string Exe)> DesktopProcesses = new()
+    {
+        [1] = (0, "claude.exe"),
+        [2] = (1, "MdReader.Bridge.exe"),
+        [10] = (1, "claude.exe"),
+        [11] = (10, "MdReader.Bridge.exe"),
+        [20] = (1, "claude.exe"),
+        [21] = (20, "MdReader.Bridge.exe"),
+        [50] = (10, "bash.exe"),
+        [99] = (50, "MdReader.Bridge.exe"),
+    };
+
+    [Fact]
+    public void The_chat_process_is_the_nearest_ancestor_with_a_bridge_not_the_shared_app()
+    {
+        Assert.Equal(10, ProcessIdentity.ChatProcess([50, 10, 1], DesktopProcesses, 99, "mdreader.bridge.exe"));
+    }
+
+    [Fact]
+    public void The_hook_itself_does_not_count_as_its_parent_s_bridge()
+    {
+        // Run straight from the chat, without a shell: the chat has the hook and its real bridge.
+        var processes = new Dictionary<int, (int Parent, string Exe)>(DesktopProcesses) { [99] = (10, "MdReader.Bridge.exe") };
+        Assert.Equal(10, ProcessIdentity.ChatProcess([10, 1], processes, 99, "MdReader.Bridge.exe"));
+    }
+
+    [Fact]
+    public void A_chat_without_a_bridge_is_not_mistaken_for_the_app_above_it()
+    {
+        // Chat 10's bridge is not running; the app (1) above it still has one.
+        var processes = new Dictionary<int, (int Parent, string Exe)>(DesktopProcesses);
+        processes.Remove(11);
+
+        Assert.Null(ProcessIdentity.ChatProcess([50, 10, 1], processes, 99, "MdReader.Bridge.exe"));
+    }
+
+    [Fact]
     public async Task Run_sends_the_reply_as_speak_reply()
     {
         PipeRequest? sent = null;

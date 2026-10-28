@@ -19,10 +19,13 @@ public sealed class SherpaTtsEngine(ModelStore store) : ITtsEngine, IDisposable
             {
                 ct.ThrowIfCancellationRequested();
                 var tts = GetOrLoad(voice.ModelId);
-                var audio = tts.Generate(text, voice.Speed, voice.SpeakerId);
+                // The models garble speech above 1x (Kokoro slurs, Piper stops at about 1.5x), so
+                // faster speeds come from TimeStretch.
+                var audio = tts.Generate(text, Math.Min(voice.Speed, 1f), voice.SpeakerId);
                 try
                 {
-                    return new AudioClip(audio.Samples, audio.SampleRate);
+                    var samples = TimeStretch.SpeedUp(audio.Samples, audio.SampleRate, voice.Speed);
+                    return new AudioClip(samples, audio.SampleRate);
                 }
                 finally
                 {

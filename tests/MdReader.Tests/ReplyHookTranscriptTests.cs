@@ -49,6 +49,49 @@ public sealed class ReplyHookTranscriptTests : IDisposable
         return path;
     }
 
+    private static string CustomTitle(string title) =>
+        JsonSerializer.Serialize(new { type = "custom-title", customTitle = title, sessionId = "abc" });
+
+    private static string AgentName(string name) =>
+        JsonSerializer.Serialize(new { type = "agent-name", agentName = name, sessionId = "abc" });
+
+    [Fact]
+    public void ChatName_is_the_latest_title_in_the_transcript()
+    {
+        var name = ReplyHook.ChatName(
+        [
+            CustomTitle("First name"),
+            User("Hi."),
+            AgentName("Agent name"),
+            CustomTitle("Renamed chat"),
+            Assistant(TextBlock("Hello.")),
+        ]);
+
+        Assert.Equal("Renamed chat", name);
+    }
+
+    [Fact]
+    public void ChatName_falls_back_to_the_agent_name_and_then_to_null()
+    {
+        Assert.Equal("Agent name", ReplyHook.ChatName([User("Hi."), AgentName("Agent name")]));
+        Assert.Null(ReplyHook.ChatName([User("Hi."), Assistant(TextBlock("Hello.")), "not json"]));
+    }
+
+    [Fact]
+    public async Task Run_sends_the_chat_name_from_the_transcript()
+    {
+        var path = WriteTranscript(CustomTitle("POS-50 branch breakdown"), User("Go."), Assistant(TextBlock("Done.")));
+        PipeRequest? sent = null;
+        await ReplyHook.RunAsync(new StringReader(StopEventFor(path)), request =>
+        {
+            sent = request;
+            return Task.FromResult(PipeResponse.Success("ok"));
+        }, transcriptAttempts: 1, transcriptDelayMs: 0);
+
+        Assert.Equal("POS-50 branch breakdown", sent!.Name);
+        Assert.Equal("Done.", sent.Text);
+    }
+
     [Fact]
     public void LastReply_is_the_text_after_the_last_user_entry()
     {

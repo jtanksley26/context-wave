@@ -34,6 +34,9 @@ public sealed class DocumentView(WebView2 webView)
           pre { background:var(--code); padding:12px; overflow:auto; border-radius:6px; }
           code { font-family:Consolas,monospace; font-size:.92em; }
           pre code[data-sid] { display:block; }
+          /* Code blocks and diagrams are for selecting and copying; clicking them does not start reading. */
+          pre [data-sid] { cursor:text; }
+          .diagram[data-sid] { cursor:default; }
           /* A mermaid block once it is drawn; the code is kept in data-source to redraw on a theme or text change. */
           .diagram { margin:1em 0; padding:12px; text-align:center; overflow:auto; border-radius:6px; }
           .diagram svg { vertical-align:top; }
@@ -329,6 +332,9 @@ public sealed class DocumentView(WebView2 webView)
               window.chrome.webview.postMessage('diff:' + section.dataset.file + ':' + (row ? row.dataset.line : ''));
               return;
             }
+            // A click in a code block or diagram, or one that ends a text selection, is for copying:
+            // jumping there would scroll the page and lose the selection.
+            if (e.target.closest('pre, .diagram') || !window.getSelection().isCollapsed) return;
             const el = e.target.closest('[data-sid]');
             if (el) window.chrome.webview.postMessage(el.dataset.sid);
           });

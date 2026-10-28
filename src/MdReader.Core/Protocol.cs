@@ -14,6 +14,21 @@ public sealed record PipeRequest
     public string? Diff { get; init; }
     public string? Title { get; init; }
     public string? Focus { get; init; }
+
+    // Which chat a request comes from, so each chat gets its own tab. All optional: a request
+    // without them goes to the tab in front.
+
+    /// <summary>The Claude Code session id; sent with replies.</summary>
+    public string? Session { get; init; }
+
+    /// <summary>The chat's working folder; names its tab until the chat's own name is known.</summary>
+    public string? Folder { get; init; }
+
+    /// <summary>The chat's name as Claude shows it; sent with replies and used for its tab.</summary>
+    public string? Name { get; init; }
+
+    /// <summary>The chat's process (<see cref="ProcessIdentity"/>), the parent of its tool bridge.</summary>
+    public string? Process { get; init; }
 }
 
 public sealed record PipeResult

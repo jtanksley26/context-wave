@@ -17,8 +17,7 @@ public partial class MainWindow : Window
     private readonly ModelStore _models = new(AppPaths.Models, new HttpClient { Timeout = TimeSpan.FromMinutes(30) });
     private readonly NAudioOutput _output = new();
     private readonly SherpaTtsEngine _tts;
-    private readonly ReadingQueue _queue;
-    private readonly ReaderSession _session;
+    private readonly ChatTabs _tabs;
     private readonly DocumentView _view;
     private readonly PipeServer _pipe;
     private readonly VisualizerFeed _feed;
@@ -46,62 +45,28 @@ public partial class MainWindow : Window
         InitializeComponent();
         _initialFile = initialFile;
         _tts = new SherpaTtsEngine(_models);
-        _queue = new ReadingQueue(_tts, _output, _settings.ToVoice);
-        _session = new ReaderSession(
-            _queue, () => _settings.AnnounceCodeBlocks, VoiceReady, () => _settings.Replies);
+        _tabs = new ChatTabs(
+            () => new ReadingQueue(_tts, _output, _settings.ToVoice),
+            () => _settings.AnnounceCodeBlocks, VoiceReady, () => _settings.Replies,
+            () => _settings.WhenPlaying, action => Dispatcher.InvokeAsync(action));
         _view = new DocumentView(WebView);
         _pipe = new PipeServer(
             PipeProtocol.DefaultPipeName,
-            request => Dispatcher.InvokeAsync(() => _session.Handle(request)).Task);
+            request => Dispatcher.InvokeAsync(() => _tabs.Handle(request)).Task);
 
-        _session.DocumentReplaced += html =>
-        {
-            _view.SetDocument(html);
-            UpdateTitle();
-            UpdatePosition();
-        };
-        _session.DocumentAppended += html =>
-        {
-            _view.Append(html);
-            UpdatePosition();
-        };
-        _session.DiffReplaced += (html, title) =>
-        {
-            _focused = null;
-            _view.SetDiff(html, title);
-            UpdateTitle();
-            if (html != "") WidenForDiff();
-        };
-        _session.ActivateRequested += BringToFront;
-
-        _queue.SentenceStarted += id => Dispatcher.InvokeAsync(() =>
-        {
-            _view.Highlight(id);
-            FollowDiff(id);
-            UpdatePosition();
-        });
-        _queue.StateChanged += _ => Dispatcher.InvokeAsync(() =>
-        {
-            // Notifications can arrive out of order; show the queue's current state.
-            var state = _queue.State;
-            PlayButton.Content = state == ReadingState.Playing ? "Pause" : "Play";
-            if (state == ReadingState.Playing) StatusText.Text = "";
-            UpdatePosition();
-        });
-        _queue.SentenceFailed += (id, ex) => FileLog.Write($"Sentence {id} could not be synthesized: {ex.Message}");
-        _queue.PlaybackFailed += ex =>
-        {
-            FileLog.Write($"Playback failed: {ex}");
-            Dispatcher.InvokeAsync(() => StatusText.Text = $"Reading stopped: {ex.Message} Press Play to retry.");
-        };
+        _tabs.TabOpened += WireTab;
+        _tabs.ActiveChanged += ShowTab;
+        _tabs.TabsChanged += BuildTabStrip;
+        _tabs.ActivateRequested += BringToFront;
 
         _view.SentenceClicked += id =>
         {
-            if (VoiceReady()) _queue.JumpTo(id);
+            if (VoiceReady()) _tabs.Active?.Queue.JumpTo(id);
         };
         _view.DiffClicked += (file, line) =>
         {
-            if (VoiceReady() && _session.SentenceForDiff(file, line) is { } id) _queue.JumpTo(id);
+            if (VoiceReady() && _tabs.Active is { } tab && tab.Session.SentenceForDiff(file, line) is { } id)
+                tab.Queue.JumpTo(id);
         };
         _view.FileDropped += OpenPath;
 
@@ -160,18 +125,166 @@ public partial class MainWindow : Window
         _visualizerTimer.Stop();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _pipe.Dispose();
-        _queue.Stop();
+        foreach (var tab in _tabs.Tabs) tab.Queue.Stop();
         _output.Dispose();
         _tts.Dispose();
     }
 
     private bool VoiceReady() => _models.IsInstalled(VoiceCatalog.Find(_settings.ModelId));
 
+    /// <summary>Shows a tab's reader in the window, but only while that tab is the one in front.</summary>
+    private void WireTab(ChatTab tab)
+    {
+        tab.Session.DocumentReplaced += html =>
+        {
+            if (tab != _tabs.Active) return;
+            _view.SetDocument(html);
+            UpdateTitle();
+            UpdatePosition();
+        };
+        tab.Session.DocumentAppended += html =>
+        {
+            if (tab != _tabs.Active) return;
+            _view.Append(html);
+            UpdatePosition();
+        };
+        tab.Session.DiffReplaced += (html, title) =>
+        {
+            if (tab != _tabs.Active) return;
+            _focused = null;
+            _view.SetDiff(html, title);
+            UpdateTitle();
+            if (html != "") WidenForDiff();
+        };
+
+        tab.Queue.SentenceStarted += id => Dispatcher.InvokeAsync(() =>
+        {
+            if (tab != _tabs.Active) return;
+            _view.Highlight(id);
+            FollowDiff(id);
+            UpdatePosition();
+        });
+        tab.Queue.StateChanged += _ => Dispatcher.InvokeAsync(() =>
+        {
+            if (tab == _tabs.Active) UpdatePlayState();
+        });
+        tab.Queue.SentenceFailed += (id, ex) =>
+            FileLog.Write($"Sentence {id} in tab '{tab.Title}' could not be synthesized: {ex.Message}");
+        tab.Queue.PlaybackFailed += ex =>
+        {
+            FileLog.Write($"Playback failed: {ex}");
+            Dispatcher.InvokeAsync(() =>
+            {
+                if (tab == _tabs.Active) StatusText.Text = $"Reading stopped: {ex.Message} Press Play to retry.";
+            });
+        };
+    }
+
+    /// <summary>Puts a tab's document, diff and place back in the window when it comes to the front.</summary>
+    private void ShowTab(ChatTab? tab)
+    {
+        _focused = null;
+        StatusText.Text = "";
+        _view.SetDocument(tab?.Html ?? "");
+        _view.SetDiff(tab?.DiffHtml ?? "", tab?.DiffTitle);
+        if (tab is { DiffHtml.Length: > 0 }) WidenForDiff();
+        // Where reading would resume, so the place is visible straight away.
+        if (tab?.Queue.CurrentSentenceId is { } id)
+        {
+            _view.Highlight(id);
+            FollowDiff(id);
+        }
+        UpdateTitle();
+        UpdatePosition();
+        UpdatePlayState();
+    }
+
+    private void BuildTabStrip()
+    {
+        TabPanel.Children.Clear();
+        foreach (var tab in _tabs.Tabs) TabPanel.Children.Add(TabHeader(tab));
+        TabStrip.Visibility = _tabs.Tabs.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>A tab's header: a dot while it has something unread, its title, and a close button.</summary>
+    private FrameworkElement TabHeader(ChatTab tab)
+    {
+        var inFront = tab == _tabs.Active;
+        var dot = new System.Windows.Shapes.Ellipse
+        {
+            Width = 7,
+            Height = 7,
+            Margin = new Thickness(0, 0, 6, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            Visibility = tab.Unread ? Visibility.Visible : Visibility.Collapsed,
+        };
+        dot.SetResourceReference(System.Windows.Shapes.Shape.FillProperty, "AccentBrush");
+        var title = new TextBlock
+        {
+            Text = tab.Title,
+            MaxWidth = 220,
+            TextTrimming = TextTrimming.CharacterEllipsis,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontWeight = inFront ? FontWeights.SemiBold : FontWeights.Normal,
+        };
+        var close = new Button
+        {
+            Content = "×",
+            Padding = new Thickness(5, 0, 5, 1),
+            Margin = new Thickness(8, 0, 0, 0),
+            Focusable = false,
+            ToolTip = "Close tab",
+        };
+        close.Click += (_, e) =>
+        {
+            e.Handled = true;
+            _tabs.Close(tab);
+        };
+
+        var header = new Border
+        {
+            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, title, close } },
+            Padding = new Thickness(10, 4, 4, 4),
+            Margin = new Thickness(0, 0, 4, 0),
+            BorderThickness = new Thickness(1, 1, 1, 0),
+            CornerRadius = new CornerRadius(4, 4, 0, 0),
+            Cursor = Cursors.Hand,
+            ToolTip = TabToolTip(tab),
+        };
+        header.SetResourceReference(Border.BackgroundProperty, inFront ? "PageBrush" : "ChromeBrush");
+        header.SetResourceReference(Border.BorderBrushProperty, "ControlBorderBrush");
+        header.MouseLeftButtonUp += (_, _) => _tabs.Select(tab);
+        header.MouseUp += (_, e) =>
+        {
+            if (e.ChangedButton == MouseButton.Middle) _tabs.Close(tab);
+        };
+        return header;
+    }
+
+    private static string TabToolTip(ChatTab tab)
+    {
+        if (tab.Key.StartsWith("file:", StringComparison.Ordinal)) return tab.Key["file:".Length..];
+        var lines = new List<string>();
+        if (tab.ChatName is { } name) lines.Add(name);
+        if (tab.Folder is { } folder) lines.Add(folder);
+        lines.Add(tab.SessionId is { } session ? $"Chat {session[..Math.Min(8, session.Length)]}" : "Claude");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private void UpdatePlayState()
+    {
+        // Notifications can arrive out of order; show the queue's current state.
+        var state = _tabs.Active?.Queue.State ?? ReadingState.Idle;
+        PlayButton.Content = state == ReadingState.Playing ? "Pause" : "Play";
+        if (state == ReadingState.Playing) StatusText.Text = "";
+        UpdatePosition();
+    }
+
     private void OpenPath(string path)
     {
         try
         {
-            _session.OpenFile(path);
+            _tabs.OpenFile(path);
             StatusText.Text = "";
         }
         catch (ReaderException ex)
@@ -192,25 +305,21 @@ public partial class MainWindow : Window
         }
     }
 
-    private void UpdateTitle() => Title = _session.DiffTitle is { } title
-        ? $"{title} - Context Wave"
-        : _session.Source switch
-        {
-            "" => "Context Wave",
-            "stream" => "Context Wave - from Claude",
-            ReaderSession.ReplySource => "Claude's reply - Context Wave",
-            var path => $"{Path.GetFileName(path)} - Context Wave",
-        };
+    private void UpdateTitle() => Title = _tabs.Active is not { } tab
+        ? "Context Wave"
+        : tab.Session.DiffTitle is { } title
+            ? $"{title} - Context Wave"
+            : tab.Session.Source == "" ? "Context Wave" : $"{tab.Title} - Context Wave";
 
     private void UpdatePosition()
     {
-        var total = _queue.Count;
-        PositionText.Text = total == 0 ? "" : $"{Math.Min(_queue.CurrentIndex + 1, total)} / {total}";
+        var total = _tabs.Active?.Queue.Count ?? 0;
+        PositionText.Text = total == 0 ? "" : $"{Math.Min(_tabs.Active!.Queue.CurrentIndex + 1, total)} / {total}";
     }
 
     private void FollowDiff(int sentenceId)
     {
-        var anchor = _session.AnchorFor(sentenceId);
+        var anchor = _tabs.Active?.Session.AnchorFor(sentenceId);
         if (anchor == _focused) return;
         _focused = anchor;
         if (anchor is null) _view.ClearDiffFocus();
@@ -396,27 +505,31 @@ public partial class MainWindow : Window
 
     private void BuildRepliesMenu()
     {
-        foreach (var (id, name) in ReplyMode.Choices)
-        {
-            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
-            item.Click += OnRepliesClick;
-            RepliesMenu.Items.Add(item);
-        }
+        AddChoices(RepliesMenu, ReplyMode.Choices, id => _settings.Replies = id);
+        AddChoices(WhenPlayingMenu, WhenPlaying.Choices, id => _settings.WhenPlaying = id);
         TickReplies();
+
+        void AddChoices(MenuItem menu, IReadOnlyList<(string Id, string DisplayName)> choices, Action<string> set)
+        {
+            foreach (var (id, name) in choices)
+            {
+                var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
+                item.Click += (_, _) =>
+                {
+                    set(id);
+                    SaveSettings();
+                    TickReplies();
+                };
+                menu.Items.Add(item);
+            }
+        }
     }
 
-    /// <summary>Clicking a checkable item toggles it first, so set every tick from the setting.</summary>
+    /// <summary>Clicking a checkable item toggles it first, so set every tick from the settings.</summary>
     private void TickReplies()
     {
-        var mode = ReplyMode.Normalize(_settings.Replies);
-        foreach (MenuItem item in RepliesMenu.Items) item.IsChecked = (string)item.Tag == mode;
-    }
-
-    private void OnRepliesClick(object sender, RoutedEventArgs e)
-    {
-        _settings.Replies = (string)((MenuItem)sender).Tag;
-        SaveSettings();
-        TickReplies();
+        Tick(RepliesMenu, ReplyMode.Normalize(_settings.Replies));
+        Tick(WhenPlayingMenu, WhenPlaying.Normalize(_settings.WhenPlaying));
     }
 
     private void BuildVisualizerMenu()
@@ -486,19 +599,19 @@ public partial class MainWindow : Window
 
     private void OnPlayClick(object sender, RoutedEventArgs e)
     {
-        if (!VoiceReady()) return;
-        if (_queue.State == ReadingState.Playing) _queue.Pause();
-        else _queue.Play();
+        if (!VoiceReady() || _tabs.Active?.Queue is not { } queue) return;
+        if (queue.State == ReadingState.Playing) queue.Pause();
+        else queue.Play();
     }
 
     private void OnPreviousClick(object sender, RoutedEventArgs e)
     {
-        if (VoiceReady()) _queue.Previous();
+        if (VoiceReady()) _tabs.Active?.Queue.Previous();
     }
 
     private void OnNextClick(object sender, RoutedEventArgs e)
     {
-        if (VoiceReady()) _queue.Next();
+        if (VoiceReady()) _tabs.Active?.Queue.Next();
     }
 
     private void OnSpeedChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
@@ -507,7 +620,7 @@ public partial class MainWindow : Window
         _settings.Speed = (float)Math.Round(e.NewValue, 1);
         SpeedText.Text = $"{_settings.Speed:0.0}x";
         SaveSettings();
-        _queue.InvalidateCache();
+        foreach (var tab in _tabs.Tabs) tab.Queue.InvalidateCache();
     }
 
     private void OnVoiceChanged(object sender, SelectionChangedEventArgs e)
@@ -518,8 +631,8 @@ public partial class MainWindow : Window
         SaveSettings();
         // Pause first: once paused, a synthesis that fails for want of the voice is held and
         // retried on Play instead of being skipped.
-        if (!VoiceReady()) _queue.Pause();
-        _queue.InvalidateCache();
+        if (!VoiceReady()) _tabs.Active?.Queue.Pause();
+        foreach (var tab in _tabs.Tabs) tab.Queue.InvalidateCache();
         UpdateBanner();
     }
 
