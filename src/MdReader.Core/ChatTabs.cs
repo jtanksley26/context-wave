@@ -162,6 +162,7 @@ public sealed class ChatTabs
         // A request that reads something brings its chat to the front, unless it waits its turn.
         var tab = existing ?? ToolTab(request, create: true)!;
         var previous = Active;
+        var wasPlaying = previous?.Queue.State == ReadingState.Playing;
         var wait = !Interrupts && previous is not null && tab != previous && IsPlaying(previous);
         if (!wait) Select(tab);
 
@@ -172,7 +173,7 @@ public sealed class ChatTabs
         {
             // Nothing came of it: do not leave an empty tab behind.
             Close(tab);
-            if (!wait && previous is not null && _tabs.Contains(previous)) Select(previous);
+            if (!wait && previous is not null) Restore(previous, wasPlaying);
         }
         else if (wait && response.Ok)
         {
@@ -192,6 +193,7 @@ public sealed class ChatTabs
         var existing = Find(key);
         var tab = existing ?? Open(key, Path.GetFileName(path));
         var previous = Active;
+        var wasPlaying = previous?.Queue.State == ReadingState.Playing;
         Select(tab);
         try
         {
@@ -202,11 +204,19 @@ public sealed class ChatTabs
             if (existing is null)
             {
                 Close(tab);
-                if (previous is not null && _tabs.Contains(previous)) Select(previous);
+                if (previous is not null) Restore(previous, wasPlaying);
             }
             throw;
         }
         return tab;
+    }
+
+    /// <summary>Brings back the tab a request that came to nothing took the front from, reading again if it was.</summary>
+    private void Restore(ChatTab previous, bool wasPlaying)
+    {
+        if (!_tabs.Contains(previous)) return;
+        Select(previous);
+        if (wasPlaying) previous.Queue.Play();
     }
 
     /// <summary>Brings a tab to the front. The tab that was in front stops reading but keeps its place.</summary>
@@ -305,14 +315,19 @@ public sealed class ChatTabs
     /// <summary>Brings forward the first tab in line whose turn it is and reads it from its first unread sentence.</summary>
     private void MoveToNext()
     {
-        _line.RemoveAll(t => !_tabs.Contains(t) || t == Active || !t.Unread);
         var all = AutoRead == ReplyMode.All;
-        var next = _line.FirstOrDefault(t => t.Requested || all);
-        if (next is null) return;
-        var start = next.FirstUnreadId;
-        Select(next);
-        if (start is { } id) next.Queue.JumpTo(id);
-        else next.Queue.Play();
+        while (true)
+        {
+            _line.RemoveAll(t => !_tabs.Contains(t) || t == Active || !t.Unread);
+            var next = _line.FirstOrDefault(t => t.Requested || all);
+            if (next is null) return;
+            var start = next.FirstUnreadId;
+            Select(next);
+            if (start is { } id && next.Queue.JumpTo(id)) return;
+            next.Queue.Play();
+            // Nothing to read there (a diff not yet narrated): it would never finish, so move on.
+            if (IsPlaying(next)) return;
+        }
     }
 
     /// <summary>

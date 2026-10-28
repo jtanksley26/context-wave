@@ -120,7 +120,7 @@ flowchart LR
 
   | Old "Claude's replies" | Auto Read | When something is playing |
   |---|---|---|
-  | `switch` | This tab | Interrupt |
+  | `switch` | This tab | Wait (Interrupt would cut off files and `speak`, which `switch` never did) |
   | `queue` | This tab | Wait |
   | `finish` | This tab | Wait |
   | `off` | Off (unchanged) | Wait (default) |

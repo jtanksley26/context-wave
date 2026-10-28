@@ -340,6 +340,20 @@ public sealed class ReaderSessionTests : IDisposable
         Assert.Equal(0, Status().DiffFiles);
     }
 
+    [Theory]
+    [InlineData(ReplyAction.Hold)]
+    [InlineData(ReplyAction.Wait)]
+    [InlineData(ReplyAction.Interrupt)]
+    public void A_reply_does_not_replace_a_diff_that_was_never_narrated(ReplyAction action)
+    {
+        ShowDiff(SampleDiff.Foo);
+        var response = _session.SpeakReply("Done.", action);
+
+        Assert.Equal("Skipped: a walkthrough is showing.", response);
+        Assert.Single(_diffs);
+        Assert.Equal(1, Status().DiffFiles);
+    }
+
     [Fact]
     public void A_failed_ReadFile_keeps_the_diff()
     {

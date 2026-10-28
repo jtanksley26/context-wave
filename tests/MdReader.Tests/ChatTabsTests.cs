@@ -329,6 +329,15 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Fact]
+    public void A_failed_tool_call_from_a_new_chat_does_not_stop_the_chat_being_read()
+    {
+        Reply("s1", "One. Two.", "a");
+        _tabs.Handle(new PipeRequest { Op = "read_file", Path = Path.Combine(_dir, "missing.md"), Process = "9@9" });
+
+        Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
+    }
+
+    [Fact]
     public void An_empty_reply_opens_no_tab()
     {
         var response = Reply("s1", "   ", "a");
@@ -431,5 +440,29 @@ public sealed class ChatTabsTests : IDisposable
     {
         Assert.Throws<ReaderException>(() => _tabs.OpenFile(Path.Combine(_dir, "missing.md")));
         Assert.Empty(_tabs.Tabs);
+    }
+
+    [Fact]
+    public void A_file_that_cannot_be_read_does_not_stop_the_chat_being_read()
+    {
+        Reply("s1", "One. Two.", "a");
+        Assert.Throws<ReaderException>(() => _tabs.OpenFile(Path.Combine(_dir, "missing.md")));
+
+        Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
+    }
+
+    [Fact]
+    public async Task A_waiting_diff_with_nothing_to_read_does_not_hold_up_the_chats_behind_it()
+    {
+        Reply("s1", "One.", "a", "100@1");
+        Reply("s2", "Reply.", "b", "200@1");
+        Reply("s3", "Reply.", "c", "300@1");
+        _whenPlaying = "wait";
+
+        Assert.True(_tabs.Handle(new PipeRequest { Op = "show_diff", Diff = SampleDiff.Foo, Process = "200@1" }).Ok);
+        Speak("Read this.", "300@1");
+
+        await PlayUntil(() => _tabs.Active!.SessionId == "s3" && IsDoneReading(Tab("s3")));
+        Assert.NotEmpty(Tab("s2").DiffHtml);
     }
 }
