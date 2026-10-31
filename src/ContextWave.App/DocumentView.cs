@@ -623,6 +623,9 @@ public sealed class DocumentView(WebView2 webView)
     /// <summary>A size shortcut was used in the page: +1 larger, -1 smaller, 0 back to the default.</summary>
     public event Action<int>? TextSizeRequested;
 
+    /// <summary>The page was loaded again after a crash and is empty until given its document.</summary>
+    public event Action? PageReloaded;
+
     public async Task InitializeAsync()
     {
         var environment = await CoreWebView2Environment.CreateAsync(null, AppPaths.WebViewData);
@@ -641,6 +644,14 @@ public sealed class DocumentView(WebView2 webView)
             OpenExternal(e.Uri);
         };
 
+        // Injected rather than linked: the page's content policy allows no script sources.
+        await core.AddScriptToExecuteOnDocumentCreatedAsync(LoadMermaid());
+        await LoadPageAsync(core);
+        core.ProcessFailed += OnProcessFailed;
+    }
+
+    private async Task LoadPageAsync(CoreWebView2 core)
+    {
         var done = new TaskCompletionSource();
         void OnCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
         {
@@ -648,8 +659,6 @@ public sealed class DocumentView(WebView2 webView)
             done.TrySetResult();
         }
         core.NavigationCompleted += OnCompleted;
-        // Injected rather than linked: the page's content policy allows no script sources.
-        await core.AddScriptToExecuteOnDocumentCreatedAsync(LoadMermaid());
         core.NavigateToString(ShellHtml);
         await done.Task;
 
@@ -658,6 +667,31 @@ public sealed class DocumentView(WebView2 webView)
         if (_theme is not null) SetTheme(_theme);
         if (_text is not null) SetText(_text);
         SetVisualizer(_visualizer);
+    }
+
+    /// <summary>
+    /// A crashed renderer leaves a blank page, so load it again. If the whole browser went, this
+    /// control cannot be revived: reading carries on with no page until the app is restarted.
+    /// </summary>
+    private async void OnProcessFailed(object? sender, CoreWebView2ProcessFailedEventArgs e)
+    {
+        if (e.ProcessFailedKind is not (CoreWebView2ProcessFailedKind.RenderProcessExited
+            or CoreWebView2ProcessFailedKind.BrowserProcessExited)) return;
+
+        FileLog.Write($"The page stopped: {e.ProcessFailedKind} ({e.Reason}).");
+        _loaded = false;
+        if (e.ProcessFailedKind != CoreWebView2ProcessFailedKind.RenderProcessExited) return;
+        try
+        {
+            var core = webView.CoreWebView2;
+            core.NavigationStarting -= OnNavigationStarting;
+            await LoadPageAsync(core);
+            PageReloaded?.Invoke();
+        }
+        catch (Exception ex)
+        {
+            FileLog.Write($"The page could not be loaded again: {ex}");
+        }
     }
 
     private static string LoadMermaid()
@@ -707,13 +741,15 @@ public sealed class DocumentView(WebView2 webView)
         {
             webView.CoreWebView2.PostWebMessageAsJson(frame.ToJson());
         }
-        catch (Exception ex) when (ex is InvalidOperationException or COMException or ObjectDisposedException
-                                       or NullReferenceException)
+        catch (Exception ex) when (IsBrowserGone(ex))
         {
             // The browser process went away or the window is closing; this runs 30 times a second,
             // so there is nothing useful to log.
         }
     }
+
+    private static bool IsBrowserGone(Exception ex) =>
+        ex is InvalidOperationException or COMException or ObjectDisposedException or NullReferenceException;
 
     /// <summary>Shows the diff pane with this HTML, or hides it when the HTML is empty.</summary>
     public void SetDiff(string html, string? title) =>
@@ -728,7 +764,16 @@ public sealed class DocumentView(WebView2 webView)
 
     private void Run(string script)
     {
-        if (_loaded) _ = webView.CoreWebView2.ExecuteScriptAsync(script);
+        if (!_loaded) return;
+        try
+        {
+            _ = webView.CoreWebView2.ExecuteScriptAsync(script);
+        }
+        catch (Exception ex) when (IsBrowserGone(ex))
+        {
+            // Runs inside the reader's document events, so a dead page must not stop the reading.
+            FileLog.Write($"The page did not take an update: {ex.Message}");
+        }
     }
 
     /// <summary>

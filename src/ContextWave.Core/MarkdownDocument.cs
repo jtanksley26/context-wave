@@ -16,7 +16,7 @@ public sealed record AppendResult(IReadOnlyList<Sentence> Sentences, string Html
 /// The folder of the file being read. Images with a relative path are resolved against it and
 /// embedded, since the page allows no image source but data URIs. Null leaves them as they are.
 /// </param>
-public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? imageFolder = null)
+public sealed class MarkdownDocument(string? imageFolder = null)
 {
     public const long MaxImageBytes = 2 * 1024 * 1024;
 
@@ -44,6 +44,7 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? ima
     private readonly List<Sentence> _sentences = [];
     private readonly StringBuilder _html = new();
     private int _nextId;
+    private bool _announceCodeBlocks;
 
     public IReadOnlyList<Sentence> Sentences => _sentences;
     public string Html => _html.ToString();
@@ -53,8 +54,11 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? ima
     /// independently, so callers should pass whole blocks (complete paragraphs, lists, fenced code
     /// blocks), not fragments.
     /// </summary>
-    public AppendResult Append(string markdown)
+    /// <param name="markdown">The blocks to add.</param>
+    /// <param name="announceCodeBlocks">Speak a line in place of each code block in this addition.</param>
+    public AppendResult Append(string markdown, bool announceCodeBlocks = true)
     {
+        _announceCodeBlocks = announceCodeBlocks;
         var ast = Markdown.Parse(markdown, Pipeline);
         SanitizeLinks(ast);
         var added = new List<Sentence>();
@@ -143,7 +147,7 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? ima
                 AddLeaf(paragraph.Inline, pause, added, pieces);
                 break;
             case CodeBlock code:
-                if (announceCodeBlocks)
+                if (_announceCodeBlocks)
                 {
                     var isDiagram = code is FencedCodeBlock fenced
                         && SpeechRules.DiagramLanguage.Equals(fenced.Info, StringComparison.OrdinalIgnoreCase);

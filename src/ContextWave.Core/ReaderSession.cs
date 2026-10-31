@@ -65,6 +65,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
             switch (request.Op)
             {
                 case "read_file":
+                    RequireDrivePath(request.Path ?? "");
                     RequireVoice();
                     OpenFile(request.Path ?? "", hold);
                     return PipeResponse.Success(
@@ -95,6 +96,17 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         {
             return PipeResponse.Fail($"Context Wave could not complete the request: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Refuses a path sent by a chat that is not on a drive. Looking at a UNC or device path makes
+    /// Windows connect to that host as the user, so a chat tricked into reading one would hand over
+    /// the user's credentials. Files the user opens themselves can still be on a network share.
+    /// </summary>
+    private static void RequireDrivePath(string path)
+    {
+        if (path.StartsWith('\\') || path.StartsWith('/'))
+            throw new ReaderException($"Only files on a drive can be read: {path}");
     }
 
     public void OpenFile(string path, bool hold = false)
@@ -144,11 +156,11 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         var replace = mode == "replace" || Source == "";
         if (replace)
         {
-            _document = new MarkdownDocument(announceCodeBlocks());
+            _document = new MarkdownDocument();
             _anchors.Clear();
         }
 
-        var result = _document.Append(text);
+        var result = _document.Append(text, announceCodeBlocks());
         var html = result.Html;
         if (anchor is not null && result.Sentences.Count > 0)
         {
@@ -189,13 +201,13 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
             if (busy || queue.Count == 0 || queue.CurrentIndex < queue.Count) return "Skipped: a walkthrough is showing.";
             queue.Stop();
             ClearDiff();
-            _document = new MarkdownDocument(announceCodeBlocks());
+            _document = new MarkdownDocument();
             Source = "";
         }
         var voiceMissing = action != ReplyAction.Hold && !voiceReady();
 
         var first = _document.Html.Length == 0;
-        var added = _document.Append(text);
+        var added = _document.Append(text, announceCodeBlocks());
         var count = added.Sentences.Count;
         // Set before the document is announced, so listeners see what it now holds.
         if (Source == "") Source = ReplySource;
@@ -225,7 +237,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         if (string.IsNullOrWhiteSpace(text)) return "Skipped: the reply is empty.";
         if (text.Length > MaxReplyChars) return "Skipped: the reply is too long.";
         // Parsed on a scratch document so a reply with nothing to read leaves the reader alone.
-        if (new MarkdownDocument(announceCodeBlocks).Append(text).Sentences.Count == 0)
+        if (new MarkdownDocument().Append(text, announceCodeBlocks).Sentences.Count == 0)
             return "Skipped: there is nothing to read in the reply.";
         return null;
     }
@@ -241,7 +253,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         var parsed = DiffDocument.Parse(diff);
 
         queue.Stop();
-        _document = new MarkdownDocument(announceCodeBlocks());
+        _document = new MarkdownDocument();
         _anchors.Clear();
         _diff = parsed;
         DiffTitle = string.IsNullOrWhiteSpace(title) ? null : title.Trim();
@@ -277,7 +289,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
     public void Stop()
     {
         queue.Stop();
-        _document = new MarkdownDocument(announceCodeBlocks());
+        _document = new MarkdownDocument();
         Source = "";
         ClearDiff();
         DocumentReplaced?.Invoke("");
@@ -301,8 +313,8 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
 
     private int Replace(string markdown, string source, bool hold)
     {
-        _document = new MarkdownDocument(announceCodeBlocks(), Path.GetDirectoryName(source));
-        var result = _document.Append(markdown);
+        _document = new MarkdownDocument(Path.GetDirectoryName(source));
+        var result = _document.Append(markdown, announceCodeBlocks());
         Source = source;
         DocumentReplaced?.Invoke(result.Html);
         queue.Load(result.Sentences, voiceReady() && !hold);

@@ -2,9 +2,22 @@ using ContextWave.Core;
 
 namespace ContextWave.Tests;
 
+/// <summary>
+/// Skipped unless CONTEXTWAVE_MANUAL_TESTS is set. A trait alone skips nothing: without a filter the
+/// test would run, and it uses the real voices folder and the network.
+/// </summary>
+internal sealed class ManualFactAttribute : FactAttribute
+{
+    public ManualFactAttribute()
+    {
+        if (Environment.GetEnvironmentVariable("CONTEXTWAVE_MANUAL_TESTS") is not { Length: > 0 })
+            Skip = "Set CONTEXTWAVE_MANUAL_TESTS=1 to run: it uses the real voices folder and the network.";
+    }
+}
+
 public class SherpaSmokeTests
 {
-    [Fact]
+    [ManualFact]
     [Trait("Category", "Manual")]
     public async Task Piper_voice_downloads_and_produces_audio()
     {

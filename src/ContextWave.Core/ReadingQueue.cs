@@ -204,13 +204,15 @@ public sealed class ReadingQueue
 
     private void Move(int delta)
     {
+        bool finished;
         lock (_gate)
         {
             if (_sentences.Count == 0) return;
             // A deliberate move starts afresh: a stall must never rewind to a pre-move position.
             _failStreak = 0;
             var target = Math.Max(0, _index + delta);
-            if (target >= _sentences.Count)
+            finished = target >= _sentences.Count;
+            if (finished)
             {
                 CancelRunLocked();
                 _index = _sentences.Count;
@@ -222,6 +224,7 @@ public sealed class ReadingQueue
             }
         }
         RaiseState();
+        if (finished) Raise(() => Finished?.Invoke());
     }
 
     private void RaiseState()

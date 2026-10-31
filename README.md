@@ -18,7 +18,7 @@ Once the bridge is registered, Claude Code and the Claude desktop app keep `out\
 To build and test while those are open, send the output somewhere else:
 
 ```bash
-dotnet test tests/ContextWave.Tests -p:ContextWaveOut=../../out-dev/ --filter "Category!=Manual"
+dotnet test tests/ContextWave.Tests -p:ContextWaveOut=../../out-dev/
 ```
 
 ## Run
@@ -114,11 +114,11 @@ default is `%LOCALAPPDATA%\MdReader`). The tests use it to stay out of that fold
 ## Test
 
 ```bash
-dotnet test ContextWave.sln --filter "Category!=Manual"
+dotnet test ContextWave.sln
 ```
 
-`--filter "Category=Manual"` runs a smoke test that downloads the Piper voice and
-synthesizes a sentence.
+One smoke test is skipped unless `CONTEXTWAVE_MANUAL_TESTS=1` is set. It downloads the
+Piper voice into the real voices folder, if it is missing, and synthesizes a sentence.
 
 ---
 *Last updated: 2026-10-20 by Drew Smith — replaced the "Claude's replies" modes with Auto Read (Off / This tab / All chats) and When something is playing (Wait / Interrupt); trimmed implementation detail*

@@ -93,6 +93,9 @@ public sealed class ChatTabs
     // in when they wait their turn.
     private readonly List<ChatTab> _line = [];
 
+    /// <summary>A tab's place in the turn order, kept so a request that fails can give it back.</summary>
+    private readonly record struct Turn(bool Unread, bool Requested, int? FirstUnreadId, int PlaceInLine);
+
     /// <param name="autoRead">A <see cref="ReplyMode"/> (Auto Read): which chats' replies are read by themselves.</param>
     /// <param name="whenPlaying">
     /// A <see cref="WhenPlaying"/>: whether a reply or a chat's request to read something waits for
@@ -140,13 +143,21 @@ public sealed class ChatTabs
             case "speak_reply":
                 // Always a success: a skipped reply is normal, and the hook must not see an error.
                 return PipeResponse.Success(Reply(request));
+            case "open_file":
+                return OpenHandedOverFile(request.Path ?? "");
         }
 
         var existing = ToolTab(request, create: false);
         if (request.Op is not ("read_file" or "speak" or "show_diff"))
         {
             // Status and stop never open a tab or reach another chat's tab.
-            if (existing is not null) return existing.Session.Handle(request);
+            if (existing is not null)
+            {
+                var result = existing.Session.Handle(request);
+                // Being told to stop ends the front tab's turn just as finishing does.
+                if (request.Op == "stop" && existing == Active) MoveToNext();
+                return result;
+            }
             return request.Op switch
             {
                 "status" => PipeResponse.Success(new PipeResult
@@ -164,18 +175,23 @@ public sealed class ChatTabs
         var previous = Active;
         var wasPlaying = previous?.Queue.State == ReadingState.Playing;
         var wait = !Interrupts && previous is not null && tab != previous && IsPlaying(previous);
+        var turn = new Turn(tab.Unread, tab.Requested, tab.FirstUnreadId, _line.IndexOf(tab));
         if (!wait) Select(tab);
 
         var before = tab.Queue.Count;
         var replacements = tab.Replacements;
         var response = tab.Session.Handle(request, hold: wait);
-        if (!response.Ok && existing is null && tab.Html.Length == 0 && tab.DiffHtml.Length == 0)
+        if (!response.Ok)
         {
-            // Nothing came of it: do not leave an empty tab behind.
-            Close(tab);
-            if (!wait && previous is not null) Restore(previous, wasPlaying);
+            // Nothing came of it: put the front tab and the chat's turn back, and leave no empty tab behind.
+            if (!wait && previous is not null && previous != tab)
+            {
+                Restore(previous, wasPlaying);
+                PutBack(tab, turn);
+            }
+            if (existing is null && tab.Html.Length == 0 && tab.DiffHtml.Length == 0) Close(tab);
         }
-        else if (wait && response.Ok)
+        else if (wait)
         {
             // Read from the request itself, past replies Auto Read left unread, unless those were
             // due to be read too (All chats). Further requests from the chat follow on from it.
@@ -201,14 +217,25 @@ public sealed class ChatTabs
         }
         catch (ReaderException)
         {
-            if (existing is null)
-            {
-                Close(tab);
-                if (previous is not null) Restore(previous, wasPlaying);
-            }
+            if (previous is not null) Restore(previous, wasPlaying);
+            if (existing is null) Close(tab);
             throw;
         }
         return tab;
+    }
+
+    /// <summary>A file from a second launch of the app gets the same treatment as one opened in this window.</summary>
+    private PipeResponse OpenHandedOverFile(string path)
+    {
+        try
+        {
+            OpenFile(path);
+            return PipeResponse.Success("Opened.");
+        }
+        catch (ReaderException ex)
+        {
+            return PipeResponse.Fail(ex.Message);
+        }
     }
 
     /// <summary>Brings back the tab a request that came to nothing took the front from, reading again if it was.</summary>
@@ -217,6 +244,16 @@ public sealed class ChatTabs
         if (!_tabs.Contains(previous)) return;
         Select(previous);
         if (wasPlaying) previous.Queue.Play();
+    }
+
+    /// <summary>Undoes what coming to the front cleared, so a request that failed costs the chat nothing.</summary>
+    private void PutBack(ChatTab tab, Turn turn)
+    {
+        tab.Unread = turn.Unread;
+        tab.Requested = turn.Requested;
+        tab.FirstUnreadId = turn.FirstUnreadId;
+        if (turn.PlaceInLine >= 0) _line.Insert(turn.PlaceInLine, tab);
+        TabsChanged?.Invoke();
     }
 
     /// <summary>Brings a tab to the front. The tab that was in front stops reading but keeps its place.</summary>
@@ -242,9 +279,15 @@ public sealed class ChatTabs
         _line.Remove(tab);
         if (tab == Active)
         {
-            Active = _tabs.Count == 0 ? null : _tabs[Math.Min(index, _tabs.Count - 1)];
-            if (Active is not null) MarkSeen(Active);
-            ActiveChanged?.Invoke(Active);
+            // Whoever is next in line comes forward; the neighbour only fills in when nobody is.
+            Active = null;
+            MoveToNext();
+            if (Active is null)
+            {
+                Active = _tabs.Count == 0 ? null : _tabs[Math.Min(index, _tabs.Count - 1)];
+                if (Active is not null) MarkSeen(Active);
+                ActiveChanged?.Invoke(Active);
+            }
         }
         TabsChanged?.Invoke();
     }

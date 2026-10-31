@@ -6,8 +6,8 @@ public class MarkdownDocumentTests
 {
     private static MarkdownDocument Parse(string markdown, bool announceCodeBlocks = true)
     {
-        var doc = new MarkdownDocument(announceCodeBlocks);
-        doc.Append(markdown);
+        var doc = new MarkdownDocument();
+        doc.Append(markdown, announceCodeBlocks);
         return doc;
     }
 

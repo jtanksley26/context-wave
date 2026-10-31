@@ -53,7 +53,18 @@ public partial class MainWindow : Window
         _tabs = new ChatTabs(
             () => new ReadingQueue(_tts, _output, _settings.ToVoice),
             () => _settings.AnnounceCodeBlocks, VoiceReady, () => _settings.Replies,
-            () => _settings.WhenPlaying, action => Dispatcher.InvokeAsync(action));
+            () => _settings.WhenPlaying, action => Dispatcher.InvokeAsync(() =>
+            {
+                // InvokeAsync keeps an exception in a task nobody reads, and the line would just stall.
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    FileLog.Write($"A tab callback failed: {ex}");
+                }
+            }));
         _view = new DocumentView(WebView);
         _pipe = new PipeServer(
             PipeProtocol.DefaultPipeName,
@@ -74,6 +85,7 @@ public partial class MainWindow : Window
                 tab.Queue.JumpTo(id);
         };
         _view.FileDropped += OpenPath;
+        _view.PageReloaded += () => ShowTab(_tabs.Active);
 
         BuildThemeMenus();
         ApplyTheme();
