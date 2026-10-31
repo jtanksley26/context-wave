@@ -14,6 +14,9 @@ public static class AppPaths
     public static string Logs => Path.Combine(Root, "logs");
     public static string WebViewData => Path.Combine(Root, "webview");
     public static string SettingsFile => Path.Combine(Root, "settings.json");
+
+    /// <summary>What is being read right now, for other programs to show (<see cref="LiveStatusWriter"/>).</summary>
+    public static string LiveFile => Path.Combine(Root, "live.json");
 }
 
 public static class FileLog

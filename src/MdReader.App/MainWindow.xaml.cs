@@ -30,6 +30,11 @@ public partial class MainWindow : Window
 
     // About 30 updates a second; the page animates smoothly between them.
     private readonly DispatcherTimer _visualizerTimer = new() { Interval = TimeSpan.FromMilliseconds(33) };
+
+    // Ten a second for other programs (the Claude desktop mod); runs whether or not the
+    // visualiser is shown.
+    private readonly DispatcherTimer _liveTimer = new() { Interval = TimeSpan.FromMilliseconds(100) };
+    private readonly LiveStatusWriter _live = new(AppPaths.LiveFile);
     private readonly string? _initialFile;
     private bool _ready;
     private bool _downloading;
@@ -79,6 +84,13 @@ public partial class MainWindow : Window
         };
         BuildVisualizerMenu();
         ApplyVisualizer();
+        _liveTimer.Tick += (_, _) =>
+        {
+            var frame = _output.TryGetPlayback(out var clip, out var position)
+                ? AudioAnalyzer.Analyze(clip, position)
+                : AudioFrame.Silent;
+            _live.Publish(LiveSnapshot.Of(_tabs.Active, frame));
+        };
         BuildRepliesMenu();
         BuildTextMenus();
         ApplyText();
@@ -110,6 +122,7 @@ public partial class MainWindow : Window
             _ready = true;
             UpdateBanner();
             _pipe.Start();
+            _liveTimer.Start();
             if (_initialFile is not null) OpenPath(Path.GetFullPath(_initialFile));
         }
         catch (Exception ex)
@@ -123,6 +136,8 @@ public partial class MainWindow : Window
     private void OnClosed(object? sender, EventArgs e)
     {
         _visualizerTimer.Stop();
+        _liveTimer.Stop();
+        _live.Clear();
         SystemEvents.UserPreferenceChanged -= OnUserPreferenceChanged;
         _pipe.Dispose();
         foreach (var tab in _tabs.Tabs) tab.Queue.Stop();

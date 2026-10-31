@@ -64,6 +64,28 @@ public sealed class ReadingQueue
         get { lock (_gate) return SentenceIdAt(_index); }
     }
 
+    /// <summary>The spoken text of the sentence reading is at or would resume from, or null past the end.</summary>
+    public string? CurrentText
+    {
+        get { lock (_gate) return _index < _sentences.Count ? _sentences[_index].SpokenText : null; }
+    }
+
+    /// <summary>
+    /// The spoken text of the sentences around the current one, and where the current one is
+    /// among them (equal to the count when reading is past the end).
+    /// </summary>
+    public (IReadOnlyList<string> Texts, int At) TextsAround(int before, int after)
+    {
+        lock (_gate)
+        {
+            var first = Math.Max(0, _index - before);
+            var end = Math.Min(_sentences.Count, _index + after + 1);
+            var texts = new List<string>();
+            for (var i = first; i < end; i++) texts.Add(_sentences[i].SpokenText);
+            return (texts, Math.Min(_index, _sentences.Count) - first);
+        }
+    }
+
     public void Load(IReadOnlyList<Sentence> sentences, bool autoPlay = true)
     {
         lock (_gate)

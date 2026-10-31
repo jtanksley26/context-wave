@@ -33,6 +33,22 @@ public class ReadingQueueTests
     }
 
     [Fact]
+    public void TextsAround_gives_the_sentences_either_side_of_the_current_one()
+    {
+        var queue = Create();
+        queue.Load(Make(10), autoPlay: false);
+        var start = queue.TextsAround(3, 2);
+        Assert.Equal(["Sentence 0.", "Sentence 1.", "Sentence 2."], start.Texts);
+        Assert.Equal(0, start.At);
+
+        queue.JumpTo(5);
+        queue.Pause();
+        var middle = queue.TextsAround(2, 1);
+        Assert.Equal(["Sentence 3.", "Sentence 4.", "Sentence 5.", "Sentence 6."], middle.Texts);
+        Assert.Equal(2, middle.At);
+    }
+
+    [Fact]
     public async Task Load_plays_every_sentence_in_order_then_finishes()
     {
         var queue = Create();
