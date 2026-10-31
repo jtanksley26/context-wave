@@ -25,16 +25,16 @@ New-Item -ItemType Directory -Force "$stage\app" | Out-Null
 # The bridge gets a folder of its own in the package: it and the app depend on different
 # versions of the same libraries, and two self-contained programs in one folder overwrite
 # each other's copies.
-$outputs = [ordered]@{ 'MdReader.App' = "$stage\app"; 'MdReader.Bridge' = "$stage\app\bridge" }
+$outputs = [ordered]@{ 'ContextWave.App' = "$stage\app"; 'ContextWave.Bridge' = "$stage\app\bridge" }
 foreach ($project in $outputs.Keys) {
     dotnet publish "$root\src\$project" -c Release -r win-x64 --self-contained true `
-        "-p:MdReaderOut=../../out-pkg/$project/" -p:DebugType=none -o $outputs[$project] -v q --nologo
+        "-p:ContextWaveOut=../../out-pkg/$project/" -p:DebugType=none -o $outputs[$project] -v q --nologo
     if ($LASTEXITCODE -ne 0) { throw "Publishing $project failed." }
 }
 
 # Publishing the app leaves the bridge's launcher beside it without the bridge's libraries
 # (the app only references the bridge for build order). It cannot run from there.
-Remove-Item (Join-Path $stage 'app\MdReader.Bridge.*') -Force
+Remove-Item (Join-Path $stage 'app\ContextWave.Bridge.*') -Force
 
 Copy-Item "$root\packaging\Install.cmd", "$root\packaging\install.ps1", "$root\packaging\README.txt" $stage
 Copy-Item "$root\packaging\Uninstall.cmd", "$root\packaging\uninstall.ps1" "$stage\app"
