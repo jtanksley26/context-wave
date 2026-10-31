@@ -13,14 +13,14 @@ $source = Join-Path $PSScriptRoot 'app'
 $target = Join-Path $env:LOCALAPPDATA 'Programs\MdReader'
 $data = Join-Path $env:LOCALAPPDATA 'MdReader'
 
-if (-not (Test-Path (Join-Path $source 'MdReader.App.exe'))) {
+if (-not (Test-Path (Join-Path $source 'ContextWave.App.exe'))) {
     throw "The 'app' folder is missing. Extract the whole zip before running Install.cmd."
 }
 
 Write-Host "Installing Context Wave to $target"
 
 # A running copy keeps its files locked.
-Get-Process MdReader.App, MdReader.Bridge -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process ContextWave.App, ContextWave.Bridge, MdReader.App, MdReader.Bridge -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 
 New-Item -ItemType Directory -Force $target | Out-Null
@@ -62,7 +62,7 @@ if (Test-Path $oldShortcut) { Remove-Item $oldShortcut -Force }
 $shortcut = Join-Path $programs 'Context Wave.lnk'
 $shell = New-Object -ComObject WScript.Shell
 $link = $shell.CreateShortcut($shortcut)
-$link.TargetPath = Join-Path $target 'MdReader.App.exe'
+$link.TargetPath = Join-Path $target 'ContextWave.App.exe'
 $link.WorkingDirectory = $target
 $link.Description = 'Reads markdown aloud'
 $link.Save()
@@ -87,12 +87,12 @@ if (-not $Claude -and -not $NoClaude) {
 }
 if ($connect) {
     Write-Host ""
-    & (Join-Path $target 'bridge\MdReader.Bridge.exe') setup
+    & (Join-Path $target 'bridge\ContextWave.Bridge.exe') setup
     Write-Host ""
     Write-Host "Restart Claude for the connection to take effect."
 }
 else {
-    Write-Host "Skipped. To connect later, run: `"$target\bridge\MdReader.Bridge.exe`" setup"
+    Write-Host "Skipped. To connect later, run: `"$target\bridge\ContextWave.Bridge.exe`" setup"
 }
 
 Write-Host ""

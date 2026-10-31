@@ -9,22 +9,22 @@ text through MCP.
 Requires the .NET SDK (9 or later) and the .NET 8 desktop runtime.
 
 ```bash
-dotnet build MdReader.sln
+dotnet build ContextWave.sln
 ```
 
 The app and the MCP bridge are written to `out/`. Close Context Wave before rebuilding.
-Once the bridge is registered, Claude Code and the Claude desktop app keep `out\MdReader.Bridge.exe` open, so close those sessions too before rebuilding.
+Once the bridge is registered, Claude Code and the Claude desktop app keep `out\ContextWave.Bridge.exe` open, so close those sessions too before rebuilding.
 
 To build and test while those are open, send the output somewhere else:
 
 ```bash
-dotnet test tests/MdReader.Tests -p:MdReaderOut=../../out-dev/ --filter "Category!=Manual"
+dotnet test tests/ContextWave.Tests -p:ContextWaveOut=../../out-dev/ --filter "Category!=Manual"
 ```
 
 ## Run
 
 ```bash
-./out/MdReader.App.exe
+./out/ContextWave.App.exe
 ```
 
 The first time you pick a voice, the window offers to download it (Kokoro is about
@@ -53,7 +53,7 @@ Every choice applies at once and is remembered.
 ## Connect Claude
 
 ```bash
-./out/MdReader.Bridge.exe setup
+./out/ContextWave.Bridge.exe setup
 ```
 
 This registers the `md-reader` MCP server with Claude Code and the Claude desktop app
@@ -114,7 +114,7 @@ default is `%LOCALAPPDATA%\MdReader`). The tests use it to stay out of that fold
 ## Test
 
 ```bash
-dotnet test MdReader.sln --filter "Category!=Manual"
+dotnet test ContextWave.sln --filter "Category!=Manual"
 ```
 
 `--filter "Category=Manual"` runs a smoke test that downloads the Piper voice and

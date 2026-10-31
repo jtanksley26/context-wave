@@ -4,16 +4,16 @@ $ErrorActionPreference = 'Stop'
 
 $target = Join-Path $env:LOCALAPPDATA 'Programs\MdReader'
 $data = Join-Path $env:LOCALAPPDATA 'MdReader'
-$bridge = Join-Path $target 'bridge\MdReader.Bridge.exe'
+$bridge = Join-Path $target 'bridge\ContextWave.Bridge.exe'
 
-Get-Process MdReader.App -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process ContextWave.App -ErrorAction SilentlyContinue | Stop-Process -Force
 
 if (Test-Path $bridge) {
     Write-Host "Removing Context Wave from Claude..."
     & $bridge setup --remove
 }
 
-Get-Process MdReader.Bridge -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process ContextWave.Bridge -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Milliseconds 500
 
 foreach ($name in 'Context Wave.lnk', 'MD Reader.lnk') {

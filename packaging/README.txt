@@ -21,18 +21,18 @@ the installer tells you if it is missing.
 If Install.cmd is blocked
 -------------------------
 Some work PCs do not allow scripts. In that case copy the "app" folder anywhere you like
-and run MdReader.App.exe from it. To use the bundled voice, copy the folder inside
+and run ContextWave.App.exe from it. To use the bundled voice, copy the folder inside
 "voices" to %LOCALAPPDATA%\MdReader\models. To connect Claude, run:
 
-    bridge\MdReader.Bridge.exe setup
+    bridge\ContextWave.Bridge.exe setup
 
 The programs are not code-signed, so Windows may show a "Windows protected your PC"
 message the first time. Choose "More info", then "Run anyway", if your PC allows it.
 
 Connect Claude later, or disconnect
 -----------------------------------
-    "%LOCALAPPDATA%\Programs\MdReader\bridge\MdReader.Bridge.exe" setup
-    "%LOCALAPPDATA%\Programs\MdReader\bridge\MdReader.Bridge.exe" setup --remove
+    "%LOCALAPPDATA%\Programs\MdReader\bridge\ContextWave.Bridge.exe" setup
+    "%LOCALAPPDATA%\Programs\MdReader\bridge\ContextWave.Bridge.exe" setup --remove
 
 Restart Claude afterwards. Reading Claude's replies aloud is off until you choose a mode
 under Settings > Auto Read in Context Wave.
