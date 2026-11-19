@@ -20,6 +20,12 @@ public sealed class MarkdownDocument(string? imageFolder = null)
 {
     public const long MaxImageBytes = 2 * 1024 * 1024;
 
+    /// <summary>
+    /// All the images one document embeds, together. Each is held as base64 in the page and in its
+    /// tab for as long as the tab is open, and copied again whenever the tab is shown.
+    /// </summary>
+    public const long MaxEmbeddedBytes = 16 * 1024 * 1024;
+
     private static readonly Dictionary<string, string> ImageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
         [".png"] = "image/png",
@@ -42,12 +48,18 @@ public sealed class MarkdownDocument(string? imageFolder = null)
     private readonly record struct Segment(Inline Node, int Start, int Length);
 
     private readonly List<Sentence> _sentences = [];
-    private readonly StringBuilder _html = new();
+    // The page's own copy of the HTML is the one kept (ChatTab); each Append returns its part.
+    private bool _hasHtml;
     private int _nextId;
     private bool _announceCodeBlocks;
+    // An image used again reuses its data URI, and only counts once towards MaxEmbeddedBytes.
+    private readonly Dictionary<string, string> _embedded = new(StringComparer.OrdinalIgnoreCase);
+    private long _embeddedBytes;
 
     public IReadOnlyList<Sentence> Sentences => _sentences;
-    public string Html => _html.ToString();
+
+    /// <summary>True until an Append has produced some HTML.</summary>
+    public bool IsEmpty => !_hasHtml;
 
     /// <summary>
     /// Parses <paramref name="markdown"/> and appends its sentences and HTML. Each call is parsed
@@ -76,7 +88,7 @@ public sealed class MarkdownDocument(string? imageFolder = null)
 
         var html = writer.ToString();
         _sentences.AddRange(added);
-        _html.Append(html);
+        if (html.Length > 0) _hasHtml = true;
         return new AppendResult(added, html);
     }
 
@@ -125,8 +137,13 @@ public sealed class MarkdownDocument(string? imageFolder = null)
             if (path.Contains(':') || Path.IsPathRooted(path)) return null;
             if (!ImageTypes.TryGetValue(Path.GetExtension(path), out var type)) return null;
             var info = new FileInfo(Path.GetFullPath(Path.Combine(imageFolder, path)));
+            if (_embedded.TryGetValue(info.FullName, out var known)) return known;
             if (!info.Exists || info.Length > MaxImageBytes) return null;
-            return $"data:{type};base64,{Convert.ToBase64String(File.ReadAllBytes(info.FullName))}";
+            if (_embeddedBytes + info.Length > MaxEmbeddedBytes) return null;
+            var data = $"data:{type};base64,{Convert.ToBase64String(File.ReadAllBytes(info.FullName))}";
+            _embeddedBytes += info.Length;
+            _embedded[info.FullName] = data;
+            return data;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
                                        or NotSupportedException or System.Security.SecurityException)

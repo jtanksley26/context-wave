@@ -10,6 +10,24 @@ public sealed class ModelStore(string root, HttpClient http)
 
     public bool IsInstalled(VoiceModel model) => File.Exists(Path.Combine(GetModelDir(model), model.ModelFile));
 
+    /// <summary>
+    /// Deletes what a download cut short by the app closing or being killed left behind: a voice
+    /// archive can be hundreds of MB. Call it before any install starts.
+    /// </summary>
+    public void DeleteLeftovers()
+    {
+        if (!Directory.Exists(root)) return;
+        try
+        {
+            foreach (var archive in Directory.GetFiles(root, "*.part")) File.Delete(archive);
+            foreach (var staging in Directory.GetDirectories(root, ".staging-*")) Directory.Delete(staging, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            FileLog.Write($"Could not delete an unfinished voice download: {ex.Message}");
+        }
+    }
+
     public async Task InstallAsync(VoiceModel model, IProgress<double>? progress, CancellationToken ct)
     {
         Directory.CreateDirectory(root);

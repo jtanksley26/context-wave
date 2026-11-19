@@ -39,6 +39,9 @@ public partial class MainWindow : Window
     private bool _ready;
     private bool _downloading;
 
+    // Stops a voice download when the window closes; a kill leaves the files for DeleteLeftovers.
+    private readonly CancellationTokenSource _closing = new();
+
     private const double DiffWindowWidth = 1300;
 
     // The place in the diff currently shown as focused; the pane is only moved when this changes,
@@ -118,6 +121,9 @@ public partial class MainWindow : Window
     {
         try
         {
+            // Before any download starts, so only the leftovers of an earlier run are deleted.
+            _models.DeleteLeftovers();
+            FileLog.DeleteOld();
             await _view.InitializeAsync();
 
             foreach (var model in VoiceCatalog.All)
@@ -147,6 +153,7 @@ public partial class MainWindow : Window
 
     private void OnClosed(object? sender, EventArgs e)
     {
+        _closing.Cancel();
         _visualizerTimer.Stop();
         _liveTimer.Stop();
         _live.Clear();
@@ -676,7 +683,7 @@ public partial class MainWindow : Window
         try
         {
             var progress = new Progress<double>(value => DownloadProgress.Value = value);
-            await _models.InstallAsync(model, progress, CancellationToken.None);
+            await _models.InstallAsync(model, progress, _closing.Token);
         }
         catch (Exception ex)
         {

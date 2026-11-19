@@ -65,6 +65,9 @@ public sealed class ChatTab
     /// <summary>The document as shown, so it can be put back when the tab is selected again.</summary>
     public string Html => _html.ToString();
 
+    /// <summary>True when no document is showing; cheaper than building <see cref="Html"/> to check.</summary>
+    public bool IsEmpty => _html.Length == 0;
+
     public string DiffHtml { get; private set; } = "";
     public string? DiffTitle { get; private set; }
 }
@@ -189,7 +192,7 @@ public sealed class ChatTabs
                 Restore(previous, wasPlaying);
                 PutBack(tab, turn);
             }
-            if (existing is null && tab.Html.Length == 0 && tab.DiffHtml.Length == 0) Close(tab);
+            if (existing is null && tab.IsEmpty && tab.DiffHtml.Length == 0) Close(tab);
         }
         else if (wait)
         {
@@ -277,6 +280,12 @@ public sealed class ChatTabs
         tab.Queue.Stop();
         _tabs.RemoveAt(index);
         _line.Remove(tab);
+        // The chat's next reply links its process again.
+        if (tab.SessionId is { } closed)
+        {
+            foreach (var process in _sessionByProcess.Where(p => p.Value == closed).Select(p => p.Key).ToList())
+                _sessionByProcess.Remove(process);
+        }
         if (tab == Active)
         {
             // Whoever is next in line comes forward; the neighbour only fills in when nobody is.

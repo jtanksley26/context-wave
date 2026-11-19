@@ -420,6 +420,26 @@ public class ReadingQueueTests
     }
 
     [Fact]
+    public async Task Halt_cancels_look_ahead_but_keeps_the_sentence_it_resumes_from()
+    {
+        _tts.Gated = true;
+        _output.Manual = true;
+        var queue = Create();
+        queue.Load(Make(10));
+        await TestUtil.WaitUntil(() => _tts.PendingCount == 4);
+        _tts.Release("Sentence 0.");
+        await TestUtil.WaitUntil(() => _output.Pending);
+
+        queue.Halt();
+
+        await TestUtil.WaitUntil(() => Enumerable.Range(1, 3).All(i => _tts.WasCancelled($"Sentence {i}.")));
+        queue.Play();
+        await TestUtil.WaitUntil(() => _started.Count(id => id == 0) == 2);
+        Assert.Equal(1, _tts.CallCount("Sentence 0."));
+        queue.Stop();
+    }
+
+    [Fact]
     public void Halt_releases_a_paused_output()
     {
         var queue = Create();

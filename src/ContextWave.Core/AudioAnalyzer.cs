@@ -53,6 +53,12 @@ public static class AudioAnalyzer
 
     private static readonly float[] Hann = CreateHann();
 
+    // Scratch space for one analysis, which the app runs dozens of times a second. One set per
+    // thread, so analyses on different threads cannot overwrite each other's.
+    [ThreadStatic] private static float[]? _window;
+    [ThreadStatic] private static float[]? _real;
+    [ThreadStatic] private static float[]? _imaginary;
+
     /// <summary>
     /// Analyses the <see cref="WindowSize"/> samples centred on <paramref name="samplePosition"/>.
     /// Samples outside the clip count as silence, so any position is valid.
@@ -61,7 +67,7 @@ public static class AudioAnalyzer
     {
         if (clip.Samples.Length == 0 || clip.SampleRate <= 0) return AudioFrame.Silent;
 
-        var window = new float[WindowSize];
+        var window = _window ??= new float[WindowSize];
         var start = (long)samplePosition - WindowSize / 2;
         double sumOfSquares = 0;
         for (var i = 0; i < WindowSize; i++)
@@ -92,8 +98,9 @@ public static class AudioAnalyzer
 
     private static float[] Bands(float[] window, int sampleRate)
     {
-        var real = new float[WindowSize];
-        var imaginary = new float[WindowSize];
+        var real = _real ??= new float[WindowSize];
+        var imaginary = _imaginary ??= new float[WindowSize];
+        Array.Clear(imaginary);
         for (var i = 0; i < WindowSize; i++) real[i] = window[i] * Hann[i];
         Fft(real, imaginary);
 

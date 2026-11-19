@@ -180,10 +180,30 @@ public sealed class ReadingQueue
         {
             if (_state == ReadingState.Idle) return;
             CancelRunLocked();
+            DropLookAheadLocked();
             _held.Clear();
             _state = ReadingState.Idle;
         }
         RaiseState();
+    }
+
+    /// <summary>
+    /// A halted tab is in the background: its look-ahead would hold the engine ahead of the tab in
+    /// front, and its audio would stay in memory until the tab is read again. Only a finished clip
+    /// for the sentence reading resumes from is kept.
+    /// </summary>
+    private void DropLookAheadLocked()
+    {
+        int? keep = _index < _sentences.Count ? _sentences[_index].Id : null;
+        foreach (var id in _clips.Keys.ToList())
+        {
+            if (id != keep || !_clips[id].IsCompletedSuccessfully) _clips.Remove(id);
+        }
+        // The run is already cancelled (CancelRunLocked), so cancelling under the lock cannot
+        // resume it; swap first so nothing can pick up the cancelled token.
+        var stale = _synthCts;
+        _synthCts = new CancellationTokenSource();
+        stale.Cancel();
     }
 
     /// <summary>Drops synthesized audio so later sentences pick up the current voice settings.</summary>

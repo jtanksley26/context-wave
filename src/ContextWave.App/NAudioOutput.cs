@@ -1,9 +1,9 @@
 using System.Diagnostics.CodeAnalysis;
-using System.IO;
 using System.Runtime.InteropServices;
 using ContextWave.Core;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
 
 namespace ContextWave.App;
 
@@ -22,11 +22,7 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
     public async Task PlayAsync(AudioClip clip, CancellationToken ct)
     {
         // WasapiOut stops without draining, which can clip the end; pad with 120 ms of silence.
-        var padding = clip.SampleRate * 120 / 1000;
-        var bytes = new byte[(clip.Samples.Length + padding) * sizeof(float)];
-        Buffer.BlockCopy(clip.Samples, 0, bytes, 0, clip.Samples.Length * sizeof(float));
-        using var stream = new RawSourceWaveStream(
-            new MemoryStream(bytes), WaveFormat.CreateIeeeFloatWaveFormat(clip.SampleRate, 1));
+        var source = new ClipProvider(clip, clip.SampleRate * 120 / 1000);
         using var device = new WasapiOut(AudioClientShareMode.Shared, 50);
 
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -35,7 +31,7 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
             if (e.Exception is not null) done.TrySetException(e.Exception);
             else done.TrySetResult();
         };
-        device.Init(stream);
+        device.Init(new SampleToWaveProvider(source));
 
         lock (_lock)
         {
@@ -113,5 +109,28 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
     public void Dispose()
     {
         lock (_lock) _current?.Stop();
+    }
+
+    /// <summary>
+    /// Plays a clip's samples where they are, then <paramref name="padding"/> samples of silence.
+    /// A copy into a byte buffer would put a second clip-sized array on the large object heap for
+    /// every sentence.
+    /// </summary>
+    private sealed class ClipProvider(AudioClip clip, int padding) : ISampleProvider
+    {
+        private int _position;
+
+        public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(clip.SampleRate, 1);
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            var read = Math.Min(count, clip.Samples.Length + padding - _position);
+            if (read <= 0) return 0;
+            var fromClip = Math.Clamp(clip.Samples.Length - _position, 0, read);
+            Array.Copy(clip.Samples, _position, buffer, offset, fromClip);
+            Array.Clear(buffer, offset + fromClip, read - fromClip);
+            _position += read;
+            return read;
+        }
     }
 }

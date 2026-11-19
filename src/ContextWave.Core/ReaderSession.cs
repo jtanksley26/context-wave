@@ -206,7 +206,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         }
         var voiceMissing = action != ReplyAction.Hold && !voiceReady();
 
-        var first = _document.Html.Length == 0;
+        var first = _document.IsEmpty;
         var added = _document.Append(text, announceCodeBlocks());
         var count = added.Sentences.Count;
         // Set before the document is announced, so listeners see what it now holds.

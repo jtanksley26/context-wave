@@ -77,6 +77,24 @@ public sealed class ModelStoreTests : IDisposable
     }
 
     [Fact]
+    public async Task Leftovers_of_a_download_cut_short_are_deleted_and_voices_are_kept()
+    {
+        var store = Store();
+        var model = Model(_hash);
+        await store.InstallAsync(model, null, CancellationToken.None);
+        File.WriteAllText(Path.Combine(_root, "other-voice.tar.bz2.part"), "partial");
+        Directory.CreateDirectory(Path.Combine(_root, ".staging-other-voice", "other-voice"));
+
+        store.DeleteLeftovers();
+
+        Assert.True(store.IsInstalled(model));
+        Assert.Equal(new[] { "fake-voice" }, Directory.GetFileSystemEntries(_root).Select(Path.GetFileName));
+    }
+
+    [Fact]
+    public void Deleting_leftovers_without_a_voices_folder_does_nothing() => Store().DeleteLeftovers();
+
+    [Fact]
     public void Catalog_falls_back_to_kokoro_for_unknown_ids()
     {
         Assert.Same(VoiceCatalog.Kokoro, VoiceCatalog.Find("nope"));
