@@ -170,7 +170,7 @@ public sealed class DocumentView(WebView2 webView)
             const size = css.getPropertyValue('--size').trim();
             const k = (parseFloat(size) || 16) / 16;
             const room = doc.clientWidth - 24; // the box's padding
-            const layouts = FLOWCHART.test(box.dataset.source) ? LAYOUTS : [NORMAL];
+            const layouts = isFlowchart(box.dataset.source) ? LAYOUTS : [NORMAL];
             let best = null;
             for (const layout of layouts) {
               const flowchart = {};
@@ -220,15 +220,39 @@ public sealed class DocumentView(WebView2 webView)
           // A wide diagram shrinks to fit the column, but no further than this; past it the box scrolls.
           // Flowcharts, in any direction, are the exception: they shrink as far as needed and never scroll.
           const MIN_DIAGRAM_SCALE = 0.75;
-          // The diagram type is the first word after any front matter, directives and comments.
-          const FLOWCHART = /^(?:\s*---\s*\n[\s\S]*?\n\s*---\s*\n)?(?:\s*%%\{[\s\S]*?\}%%|\s*%%[^\n]*)*\s*(?:flowchart|graph)\b/i;
+          // The diagram type is the first word after any front matter, directives and comments. Read line by
+          // line: one regex for all of this backtracked exponentially on a run of % and hung the page.
+          function isFlowchart(source) {
+            const lines = source.split('\n');
+            let i = 0;
+            while (i < lines.length && !lines[i].trim()) i++;
+            if (lines[i]?.trim() === '---') {
+              do i++; while (i < lines.length && lines[i].trim() !== '---');
+              i++;
+            }
+            // Once a directive is found unclosed, later ones are too; an unclosed one reads as a comment.
+            let unclosed = false;
+            for (; i < lines.length; i++) {
+              let line = lines[i].trim();
+              if (line.startsWith('%%{') && !unclosed) {
+                let end = i;
+                while (end < lines.length && !lines[end].includes('}%%')) end++;
+                if (end === lines.length) { unclosed = true; continue; }
+                i = end;
+                line = lines[i].slice(lines[i].indexOf('}%%') + 3).trim();
+              }
+              if (!line || line.startsWith('%%')) continue;
+              return /^(?:flowchart|graph)\b/i.test(line);
+            }
+            return false;
+          }
           function fitDiagram(box) {
             const svg = box.querySelector('svg');
             const view = svg && svg.viewBox.baseVal;
             if (!view || !view.width) return;
             const pad = getComputedStyle(box);
             const room = box.clientWidth - parseFloat(pad.paddingLeft) - parseFloat(pad.paddingRight);
-            const floor = FLOWCHART.test(box.dataset.source) ? 0 : MIN_DIAGRAM_SCALE;
+            const floor = isFlowchart(box.dataset.source) ? 0 : MIN_DIAGRAM_SCALE;
             const scale = Math.min(1, Math.max(floor, room / view.width));
             svg.style.maxWidth = 'none'; // mermaid's own cap would shrink it all the way
             // Rounded down so a diagram scaled to the column does not overflow it by a fraction of a pixel.
@@ -248,7 +272,7 @@ public sealed class DocumentView(WebView2 webView)
             clearTimeout(rewrapTimer);
             rewrapTimer = setTimeout(() => {
               if (!window.mermaid) return;
-              doc.querySelectorAll('.diagram').forEach(box => { if (FLOWCHART.test(box.dataset.source)) drawDiagram(box); });
+              doc.querySelectorAll('.diagram').forEach(box => { if (isFlowchart(box.dataset.source)) drawDiagram(box); });
             }, 300);
           }).observe(doc);
           function highlight(id) {

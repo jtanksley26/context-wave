@@ -39,6 +39,8 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
 
         lock (_lock)
         {
+            // Cancelled already means its tab was halted, and the next tab may be playing by now.
+            ct.ThrowIfCancellationRequested();
             _current = device;
             _clip = clip;
         }
@@ -56,8 +58,13 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
         {
             lock (_lock)
             {
-                _current = null;
-                _clip = null;
+                // Every tab plays through this output, and a halted tab's playback can end after the
+                // next tab's has started; only the playback that is still current clears it.
+                if (_current == device)
+                {
+                    _current = null;
+                    _clip = null;
+                }
             }
         }
     }

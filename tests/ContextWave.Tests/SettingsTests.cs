@@ -36,6 +36,29 @@ public sealed class SettingsTests : IDisposable
     }
 
     [Fact]
+    public void A_value_of_the_wrong_type_keeps_the_other_settings()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(File_)!);
+        File.WriteAllText(File_, """{ "ModelId": "x", "SpeakerId": 4, "Speed": "fast", "AnnounceCodeBlocks": "yes", "Theme": "dark" }""");
+
+        var settings = Settings.Load(File_);
+
+        Assert.Equal(("x", 4, "dark"), (settings.ModelId, settings.SpeakerId, settings.Theme));
+        Assert.Equal(1.0f, settings.Speed);
+        Assert.True(settings.AnnounceCodeBlocks);
+    }
+
+    [Fact]
+    public void Saving_replaces_the_file_and_leaves_nothing_beside_it()
+    {
+        new Settings { SpeakerId = 2 }.Save(File_);
+        new Settings { SpeakerId = 3 }.Save(File_);
+
+        Assert.Equal(3, Settings.Load(File_).SpeakerId);
+        Assert.Equal(["settings.json"], Directory.GetFiles(Path.GetDirectoryName(File_)!).Select(Path.GetFileName));
+    }
+
+    [Fact]
     public void Null_model_id_and_negative_speaker_fall_back_to_safe_values()
     {
         Directory.CreateDirectory(Path.GetDirectoryName(File_)!);

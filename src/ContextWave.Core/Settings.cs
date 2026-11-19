@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace ContextWave.Core;
 
@@ -30,7 +31,7 @@ public sealed class Settings
         {
             if (File.Exists(path))
             {
-                var loaded = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path)) ?? new Settings();
+                var loaded = Parse(File.ReadAllText(path));
                 if (string.IsNullOrEmpty(loaded.ModelId)) loaded.ModelId = "kokoro-en-v0_19";
                 if (loaded.SpeakerId < 0) loaded.SpeakerId = 0;
                 // Unknown ids are kept as written; ThemeCatalog.Resolve treats them as the defaults.
@@ -59,10 +60,42 @@ public sealed class Settings
         return new Settings();
     }
 
+    /// <exception cref="JsonException">The text is not a JSON object.</exception>
+    private static Settings Parse(string json)
+    {
+        try
+        {
+            return JsonSerializer.Deserialize<Settings>(json) ?? new Settings();
+        }
+        catch (JsonException)
+        {
+        }
+
+        // One value of the wrong type, say from a hand edit, would otherwise lose every setting, and the
+        // next save would write the defaults over them. Keep each value that still reads.
+        var settings = new Settings();
+        if (JsonNode.Parse(json) is not JsonObject values) return settings;
+        foreach (var property in typeof(Settings).GetProperties())
+        {
+            if (!property.CanWrite || !values.TryGetPropertyValue(property.Name, out var value)) continue;
+            try
+            {
+                property.SetValue(settings, value.Deserialize(property.PropertyType));
+            }
+            catch (JsonException)
+            {
+            }
+        }
+        return settings;
+    }
+
     public void Save(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        File.WriteAllText(path, JsonSerializer.Serialize(this, Json));
+        // Write beside the file and swap it in, so a crash cannot leave the settings half-written.
+        var temporary = path + ".tmp";
+        File.WriteAllText(temporary, JsonSerializer.Serialize(this, Json));
+        File.Move(temporary, path, overwrite: true);
     }
 
     public VoiceSettings ToVoice() => new(ModelId, SpeakerId, Math.Clamp(Speed, 0.5f, 2.0f));

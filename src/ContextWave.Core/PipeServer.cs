@@ -1,9 +1,14 @@
 using System.IO.Pipes;
+using System.Security.Principal;
 using System.Text.Json;
 
 namespace ContextWave.Core;
 
-public sealed class PipeServer(string pipeName, Func<PipeRequest, Task<PipeResponse>> handler) : IDisposable
+/// <param name="isTrustedOwner">Decides whether the pipe's owner is this user; tests replace it.</param>
+public sealed class PipeServer(
+    string pipeName,
+    Func<PipeRequest, Task<PipeResponse>> handler,
+    Func<SecurityIdentifier?, bool>? isTrustedOwner = null) : IDisposable
 {
     private readonly CancellationTokenSource _cts = new();
 
@@ -16,12 +21,32 @@ public sealed class PipeServer(string pipeName, Func<PipeRequest, Task<PipeRespo
 
     public void Dispose() => _cts.Cancel();
 
-    private NamedPipeServerStream Create() => new(
-        pipeName,
-        PipeDirection.InOut,
-        NamedPipeServerStream.MaxAllowedServerInstances,
-        PipeTransmissionMode.Byte,
-        PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+    /// <exception cref="UnauthorizedAccessException">Another user created the pipe first.</exception>
+    private NamedPipeServerStream Create()
+    {
+        var pipe = new NamedPipeServerStream(
+            pipeName,
+            PipeDirection.InOut,
+            NamedPipeServerStream.MaxAllowedServerInstances,
+            PipeTransmissionMode.Byte,
+            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+
+        // The name is predictable, so another user can create the pipe first and let anyone in. This
+        // instance then joins their pipe, which they own, and they could connect and send requests.
+        SecurityIdentifier? owner;
+        try
+        {
+            owner = pipe.GetAccessControl().GetOwner(typeof(SecurityIdentifier)) as SecurityIdentifier;
+        }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or IOException or InvalidOperationException)
+        {
+            owner = null;
+        }
+        if ((isTrustedOwner ?? PipeOwner.IsTrustedForCurrentUser)(owner)) return pipe;
+
+        pipe.Dispose();
+        throw new UnauthorizedAccessException("Context Wave's pipe was created by another user.");
+    }
 
     private async Task AcceptLoopAsync(NamedPipeServerStream? pipe, CancellationToken ct)
     {
