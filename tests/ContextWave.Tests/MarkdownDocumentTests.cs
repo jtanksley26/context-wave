@@ -4,13 +4,16 @@ namespace ContextWave.Tests;
 
 public class MarkdownDocumentTests
 {
-    private static MarkdownDocument Parse(string markdown, bool announceCodeBlocks = true)
+    /// <summary>One markdown parsed on its own: its sentences and the HTML that Append returned.</summary>
+    private sealed record Parsed(IReadOnlyList<Sentence> Sentences, string Html);
+
+    private static Parsed Parse(string markdown, bool announceCodeBlocks = true)
     {
-        var doc = new MarkdownDocument(announceCodeBlocks);
-        doc.Append(markdown);
-        return doc;
+        var added = new MarkdownDocument().Append(markdown, announceCodeBlocks);
+        return new Parsed(added.Sentences, added.Html);
     }
 
+    private static string[] Spoken(Parsed parsed) => parsed.Sentences.Select(s => s.SpokenText).ToArray();
     private static string[] Spoken(MarkdownDocument doc) => doc.Sentences.Select(s => s.SpokenText).ToArray();
 
     [Fact]
@@ -94,10 +97,10 @@ public class MarkdownDocumentTests
             Directory.CreateDirectory(Path.Combine(dir, "my images"));
             File.WriteAllBytes(Path.Combine(dir, "my images", "cat.png"), [1, 2, 3]);
             var doc = new MarkdownDocument(imageFolder: dir);
-            doc.Append("![A cat](my%20images/cat.png?v=1)");
+            var html = doc.Append("![A cat](my%20images/cat.png?v=1)").Html;
 
-            Assert.Contains("src=\"data:image/png;base64,AQID\"", doc.Html);
-            Assert.Contains("alt=\"A cat\"", doc.Html);
+            Assert.Contains("src=\"data:image/png;base64,AQID\"", html);
+            Assert.Contains("alt=\"A cat\"", html);
             Assert.Equal(new[] { "A cat" }, Spoken(doc));
         }
         finally
@@ -115,9 +118,9 @@ public class MarkdownDocumentTests
             Directory.CreateDirectory(Path.Combine(dir, "docs"));
             File.WriteAllText(Path.Combine(dir, "flow.svg"), "<svg/>");
             var doc = new MarkdownDocument(imageFolder: Path.Combine(dir, "docs"));
-            doc.Append("![Flow](../flow.svg)");
+            var html = doc.Append("![Flow](../flow.svg)").Html;
 
-            Assert.Contains("src=\"data:image/svg+xml;base64,PHN2Zy8+\"", doc.Html);
+            Assert.Contains("src=\"data:image/svg+xml;base64,PHN2Zy8+\"", html);
         }
         finally
         {
@@ -135,10 +138,9 @@ public class MarkdownDocumentTests
         try
         {
             File.WriteAllText(Path.Combine(dir, "notes.txt"), "not an image");
-            var doc = new MarkdownDocument(imageFolder: dir);
-            doc.Append(markdown);
+            var html = new MarkdownDocument(imageFolder: dir).Append(markdown).Html;
 
-            Assert.Contains($"src=\"{url}\"", doc.Html);
+            Assert.Contains($"src=\"{url}\"", html);
         }
         finally
         {
@@ -214,7 +216,68 @@ public class MarkdownDocumentTests
         Assert.Contains("Two.", second.Html);
         Assert.DoesNotContain("One.", second.Html);
         Assert.Equal(2, doc.Sentences.Count);
-        Assert.Contains("One.", doc.Html);
-        Assert.Contains("Two.", doc.Html);
+    }
+
+    [Fact]
+    public void A_document_is_empty_until_something_is_appended()
+    {
+        var doc = new MarkdownDocument();
+        Assert.True(doc.IsEmpty);
+
+        doc.Append("One.");
+
+        Assert.False(doc.IsEmpty);
+    }
+
+    [Fact]
+    public void An_image_used_twice_is_read_once_and_counted_once()
+    {
+        var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
+        try
+        {
+            var path = Path.Combine(dir, "big.png");
+            File.WriteAllBytes(path, new byte[MarkdownDocument.MaxImageBytes]);
+            var doc = new MarkdownDocument(imageFolder: dir);
+            var images = string.Concat(Enumerable.Repeat("![x](big.png) ", 20));
+
+            var html = doc.Append(images).Html;
+
+            Assert.Equal(20, html.Split("src=\"data:image/png;base64,").Length - 1);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Images_past_the_document_limit_keep_their_url()
+    {
+        var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
+        try
+        {
+            var count = (int)(MarkdownDocument.MaxEmbeddedBytes / MarkdownDocument.MaxImageBytes) + 2;
+            var markdown = "";
+            for (var i = 0; i < count; i++)
+            {
+                File.WriteAllBytes(Path.Combine(dir, $"{i}.png"), new byte[MarkdownDocument.MaxImageBytes]);
+                markdown += $"![x]({i}.png) ";
+            }
+            File.WriteAllBytes(Path.Combine(dir, "small.png"), [1, 2, 3]);
+            var doc = new MarkdownDocument(imageFolder: dir);
+
+            var first = doc.Append(markdown).Html;
+            var later = doc.Append("![x](0.png) ![y](small.png)").Html;
+
+            Assert.Equal(count - 2, first.Split("src=\"data:").Length - 1);
+            Assert.Contains($"src=\"{count - 1}.png\"", first);
+            // An image already embedded still is; nothing new is once the limit is reached.
+            Assert.Equal(1, later.Split("src=\"data:").Length - 1);
+            Assert.Contains("src=\"small.png\"", later);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
     }
 }

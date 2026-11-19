@@ -30,6 +30,28 @@ public class PipeTests
     }
 
     [Fact]
+    public void The_server_checks_that_it_owns_the_pipe_it_listens_on()
+    {
+        SecurityIdentifier? seen = null;
+        using var server = new PipeServer(NewName(), _ => Task.FromResult(PipeResponse.Success("ok")), owner =>
+        {
+            seen = owner;
+            return true;
+        });
+        server.Start();
+
+        Assert.True(PipeOwner.IsTrustedForCurrentUser(seen));
+    }
+
+    [Fact]
+    public void A_pipe_owned_by_someone_else_is_refused()
+    {
+        using var server = new PipeServer(NewName(), _ => Task.FromResult(PipeResponse.Success("ok")), _ => false);
+
+        Assert.Throws<UnauthorizedAccessException>(server.Start);
+    }
+
+    [Fact]
     public async Task Diff_fields_round_trip()
     {
         var name = NewName();

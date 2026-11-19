@@ -49,6 +49,41 @@ public sealed class ReaderSessionTests : IDisposable
     /// <summary>A reply, held, waiting or interrupting as <see cref="_action"/> says (the tabs decide which).</summary>
     private PipeResponse Reply(string text) => PipeResponse.Success(_session.SpeakReply(text, _action));
 
+    [Fact]
+    public void A_first_reply_does_not_announce_code_blocks_when_the_setting_is_off()
+    {
+        _announce = false;
+
+        Reply("Some text.\n\n~~~\ncode\n~~~");
+
+        Assert.Equal(1, _queue.Count);
+    }
+
+    [Fact]
+    public void A_reply_follows_the_setting_as_it_is_now_not_as_it_was_when_the_document_began()
+    {
+        _announce = false;
+        Speak("One.");
+        _announce = true;
+
+        Reply("~~~\ncode\n~~~");
+
+        Assert.Equal(2, _queue.Count);
+    }
+
+    [Theory]
+    [InlineData(@"\\127.0.0.1\share\notes.md")]
+    [InlineData("//127.0.0.1/share/notes.md")]
+    [InlineData(@"\\?\UNC\127.0.0.1\share\notes.md")]
+    [InlineData(@"\??\UNC\127.0.0.1\share\notes.md")]
+    public void Read_file_refuses_network_and_device_paths(string path)
+    {
+        var response = ReadFile(path);
+
+        Assert.False(response.Ok);
+        Assert.Contains("on a drive", response.Error);
+    }
+
     /// <summary>Lets the sentence in progress finish and waits for the reader to go idle.</summary>
     private async Task FinishReading()
     {

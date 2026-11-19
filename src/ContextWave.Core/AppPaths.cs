@@ -21,7 +21,28 @@ public static class AppPaths
 
 public static class FileLog
 {
+    /// <summary>How long a day's log is kept.</summary>
+    public static readonly TimeSpan KeepFor = TimeSpan.FromDays(14);
+
     private static readonly object Lock = new();
+
+    /// <summary>Deletes the logs of days older than <see cref="KeepFor"/>; a new file starts every day.</summary>
+    public static void DeleteOld()
+    {
+        try
+        {
+            if (!Directory.Exists(AppPaths.Logs)) return;
+            var cutoff = DateTime.Now - KeepFor;
+            foreach (var log in Directory.GetFiles(AppPaths.Logs, "*.log"))
+            {
+                if (File.GetLastWriteTime(log) < cutoff) File.Delete(log);
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // An old log that cannot be deleted now is deleted another day.
+        }
+    }
 
     public static void Write(string message)
     {

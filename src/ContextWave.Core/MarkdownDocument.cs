@@ -16,9 +16,15 @@ public sealed record AppendResult(IReadOnlyList<Sentence> Sentences, string Html
 /// The folder of the file being read. Images with a relative path are resolved against it and
 /// embedded, since the page allows no image source but data URIs. Null leaves them as they are.
 /// </param>
-public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? imageFolder = null)
+public sealed class MarkdownDocument(string? imageFolder = null)
 {
     public const long MaxImageBytes = 2 * 1024 * 1024;
+
+    /// <summary>
+    /// All the images one document embeds, together. Each is held as base64 in the page and in its
+    /// tab for as long as the tab is open, and copied again whenever the tab is shown.
+    /// </summary>
+    public const long MaxEmbeddedBytes = 16 * 1024 * 1024;
 
     private static readonly Dictionary<string, string> ImageTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -42,19 +48,29 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? ima
     private readonly record struct Segment(Inline Node, int Start, int Length);
 
     private readonly List<Sentence> _sentences = [];
-    private readonly StringBuilder _html = new();
+    // The page's own copy of the HTML is the one kept (ChatTab); each Append returns its part.
+    private bool _hasHtml;
     private int _nextId;
+    private bool _announceCodeBlocks;
+    // An image used again reuses its data URI, and only counts once towards MaxEmbeddedBytes.
+    private readonly Dictionary<string, string> _embedded = new(StringComparer.OrdinalIgnoreCase);
+    private long _embeddedBytes;
 
     public IReadOnlyList<Sentence> Sentences => _sentences;
-    public string Html => _html.ToString();
+
+    /// <summary>True until an Append has produced some HTML.</summary>
+    public bool IsEmpty => !_hasHtml;
 
     /// <summary>
     /// Parses <paramref name="markdown"/> and appends its sentences and HTML. Each call is parsed
     /// independently, so callers should pass whole blocks (complete paragraphs, lists, fenced code
     /// blocks), not fragments.
     /// </summary>
-    public AppendResult Append(string markdown)
+    /// <param name="markdown">The blocks to add.</param>
+    /// <param name="announceCodeBlocks">Speak a line in place of each code block in this addition.</param>
+    public AppendResult Append(string markdown, bool announceCodeBlocks = true)
     {
+        _announceCodeBlocks = announceCodeBlocks;
         var ast = Markdown.Parse(markdown, Pipeline);
         SanitizeLinks(ast);
         var added = new List<Sentence>();
@@ -72,7 +88,7 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? ima
 
         var html = writer.ToString();
         _sentences.AddRange(added);
-        _html.Append(html);
+        if (html.Length > 0) _hasHtml = true;
         return new AppendResult(added, html);
     }
 
@@ -121,8 +137,13 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? ima
             if (path.Contains(':') || Path.IsPathRooted(path)) return null;
             if (!ImageTypes.TryGetValue(Path.GetExtension(path), out var type)) return null;
             var info = new FileInfo(Path.GetFullPath(Path.Combine(imageFolder, path)));
+            if (_embedded.TryGetValue(info.FullName, out var known)) return known;
             if (!info.Exists || info.Length > MaxImageBytes) return null;
-            return $"data:{type};base64,{Convert.ToBase64String(File.ReadAllBytes(info.FullName))}";
+            if (_embeddedBytes + info.Length > MaxEmbeddedBytes) return null;
+            var data = $"data:{type};base64,{Convert.ToBase64String(File.ReadAllBytes(info.FullName))}";
+            _embeddedBytes += info.Length;
+            _embedded[info.FullName] = data;
+            return data;
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException
                                        or NotSupportedException or System.Security.SecurityException)
@@ -143,7 +164,7 @@ public sealed class MarkdownDocument(bool announceCodeBlocks = true, string? ima
                 AddLeaf(paragraph.Inline, pause, added, pieces);
                 break;
             case CodeBlock code:
-                if (announceCodeBlocks)
+                if (_announceCodeBlocks)
                 {
                     var isDiagram = code is FencedCodeBlock fenced
                         && SpeechRules.DiagramLanguage.Equals(fenced.Info, StringComparison.OrdinalIgnoreCase);

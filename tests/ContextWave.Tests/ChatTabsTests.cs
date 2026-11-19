@@ -55,6 +55,143 @@ public sealed class ChatTabsTests : IDisposable
     private static bool IsDoneReading(ChatTab tab) =>
         tab.Queue.State == ReadingState.Idle && tab.Queue.CurrentIndex >= tab.Queue.Count;
 
+    /// <summary>Whether this sentence has been played (FakeTts makes each clip as long as its text).</summary>
+    private bool Heard(string text) => _output.Played.Any(clip => clip.Samples[0] == text.Length);
+
+    /// <summary>s1 is reading; s2 has a request waiting its turn and s3 only an unread reply.</summary>
+    private void ChatsWaitingBehind(string request = "Read this request.")
+    {
+        Reply("s1", "One.", "a", "100@1");
+        Reply("s3", "Unread.", "c", "300@1");
+        Reply("s2", "Reply.", "b", "200@1");
+        _whenPlaying = "wait";
+        Speak(request, "200@1");
+    }
+
+    [Fact]
+    public async Task Next_past_the_last_sentence_brings_on_the_chat_in_line()
+    {
+        ChatsWaitingBehind();
+
+        _tabs.Active!.Queue.Next();
+
+        await PlayUntil(() => Heard("Read this request."));
+        Assert.Equal("s2", _tabs.Active!.SessionId);
+    }
+
+    [Fact]
+    public async Task Stop_from_the_front_chat_brings_on_the_chat_in_line()
+    {
+        ChatsWaitingBehind();
+
+        _tabs.Handle(new PipeRequest { Op = "stop", Process = "100@1" });
+
+        await PlayUntil(() => Heard("Read this request."));
+        Assert.Equal("s2", _tabs.Active!.SessionId);
+    }
+
+    [Fact]
+    public async Task Closing_the_front_tab_reads_a_request_waiting_in_the_tab_next_to_it()
+    {
+        Reply("s1", "One.", "a", "100@1");
+        Reply("s2", "Reply.", "b", "200@1");
+        _whenPlaying = "wait";
+        Speak("Read this request.", "200@1");
+
+        _tabs.Close(Tab("s1"));
+
+        await PlayUntil(() => Heard("Read this request."));
+        Assert.Equal("s2", _tabs.Active!.SessionId);
+    }
+
+    [Fact]
+    public async Task Closing_the_front_tab_moves_on_to_the_next_in_line_not_the_neighbour()
+    {
+        ChatsWaitingBehind();
+
+        _tabs.Close(Tab("s1"));
+
+        await PlayUntil(() => Heard("Read this request."));
+        Assert.Equal("s2", _tabs.Active!.SessionId);
+        Assert.True(Tab("s3").Unread);
+    }
+
+    [Theory]
+    [InlineData("read_file")]
+    [InlineData("speak")]
+    public void A_failed_tool_call_from_a_chat_with_a_tab_does_not_stop_the_chat_being_read(string op)
+    {
+        Reply("s1", "One. Two.", "a", "100@1");
+        Reply("s2", "Reply.", "b", "200@1");
+
+        var response = _tabs.Handle(new PipeRequest
+        {
+            Op = op, Path = Path.Combine(_dir, "missing.md"), Text = " ", Process = "200@1",
+        });
+
+        Assert.False(response.Ok);
+        Assert.Equal("s1", _tabs.Active!.SessionId);
+        Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
+        Assert.True(Tab("s2").Unread);
+    }
+
+    [Fact]
+    public async Task A_failed_tool_call_keeps_the_chats_place_in_line()
+    {
+        ChatsWaitingBehind();
+        _whenPlaying = "interrupt";
+
+        _tabs.Handle(new PipeRequest { Op = "read_file", Path = Path.Combine(_dir, "missing.md"), Process = "200@1" });
+        Assert.Equal("s1", _tabs.Active!.SessionId);
+        Tab("s1").Queue.Next();
+
+        await PlayUntil(() => Heard("Read this request."));
+        Assert.Equal("s2", _tabs.Active!.SessionId);
+    }
+
+    [Fact]
+    public void Reopening_a_deleted_file_does_not_stop_the_chat_being_read()
+    {
+        var path = Path.Combine(_dir, "notes.md");
+        File.WriteAllText(path, "One. Two.");
+        Reply("s1", "One. Two.", "a");
+        var file = _tabs.OpenFile(path);
+        _tabs.Select(Tab("s1"));
+        Tab("s1").Queue.Play();
+        File.Delete(path);
+
+        Assert.Throws<ReaderException>(() => _tabs.OpenFile(path));
+
+        Assert.Equal("s1", _tabs.Active!.SessionId);
+        Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
+        Assert.Contains(file, _tabs.Tabs);
+    }
+
+    [Fact]
+    public void A_file_handed_over_by_a_second_launch_opens_in_its_own_tab()
+    {
+        var path = Path.Combine(_dir, "notes.md");
+        File.WriteAllText(path, "From the file.");
+        Reply("s1", "From the chat.", "a");
+
+        var response = _tabs.Handle(new PipeRequest { Op = "open_file", Path = path });
+
+        Assert.True(response.Ok, response.Error);
+        Assert.Equal(2, _tabs.Tabs.Count);
+        Assert.Equal("notes.md", _tabs.Active!.Title);
+        Assert.Contains("From the chat.", Tab("s1").Html);
+    }
+
+    [Fact]
+    public void A_handed_over_file_that_cannot_be_read_reports_why_and_leaves_no_tab()
+    {
+        var response = _tabs.Handle(new PipeRequest { Op = "open_file", Path = Path.Combine(_dir, "missing.md") });
+
+        Assert.False(response.Ok);
+        Assert.Contains("not found", response.Error);
+        Assert.Empty(_tabs.Tabs);
+    }
+
     [Fact]
     public void A_tab_is_named_after_its_chat_and_follows_a_rename()
     {

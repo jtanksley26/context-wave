@@ -62,8 +62,9 @@ public partial class App : Application
         {
             var pipe = PipeProtocol.DefaultPipeName;
             await PipeClient.SendAsync(pipe, new PipeRequest { Op = "activate" }, 5000);
-            if (file is not null)
-                await PipeClient.SendAsync(pipe, new PipeRequest { Op = "read_file", Path = Path.GetFullPath(file) }, 5000);
+            if (file is null) return;
+            var opened = await PipeClient.SendAsync(pipe, new PipeRequest { Op = "open_file", Path = Path.GetFullPath(file) }, 5000);
+            if (!opened.Ok) FileLog.Write($"The running instance could not open {file}: {opened.Error}");
         }
         catch (Exception ex) when (ex is TimeoutException or IOException)
         {
