@@ -21,4 +21,20 @@ public class FileLogTests
         Assert.True(File.Exists(recent));
         File.Delete(recent);
     }
+
+    [Fact]
+    public void A_line_is_written_while_another_process_holds_the_log_open()
+    {
+        Directory.CreateDirectory(AppPaths.Logs);
+        var file = Path.Combine(AppPaths.Logs, $"{DateTime.Now:yyyy-MM-dd}.log");
+        var marker = $"shared-{Guid.NewGuid():N}";
+
+        // Another writer, opened the way the bridge and the reply hook open it.
+        using (new FileStream(file, FileMode.Append, FileAccess.Write, FileShare.ReadWrite | FileShare.Delete))
+            FileLog.Write(marker);
+
+        using var reader = new StreamReader(
+            new FileStream(file, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete));
+        Assert.Contains(marker, reader.ReadToEnd());
+    }
 }

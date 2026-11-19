@@ -16,6 +16,14 @@ public static class PipeOps
     public const string SpeakReply = "speak_reply";
     public const string Activate = "activate";
     public const string OpenFile = "open_file";
+
+    /// <summary>
+    /// The ops that read something: they open the chat's tab, take the front and wait their turn.
+    /// <see cref="ReaderSession"/> must handle every one of them.
+    /// </summary>
+    public static readonly IReadOnlyList<string> Reading = [ReadFile, Speak, ShowDiff];
+
+    public static bool IsReading(string op) => op is ReadFile or Speak or ShowDiff;
 }
 
 public sealed record PipeRequest
