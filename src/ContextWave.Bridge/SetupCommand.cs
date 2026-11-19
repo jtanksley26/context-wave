@@ -119,8 +119,17 @@ public static class SetupCommand
     private static void WriteAtomically(string file, string text)
     {
         var temporary = file + ".contextwave-tmp";
-        File.WriteAllText(temporary, text);
-        File.Move(temporary, file, overwrite: true);
+        try
+        {
+            File.WriteAllText(temporary, text);
+            File.Move(temporary, file, overwrite: true);
+        }
+        catch
+        {
+            // Leave nothing half-written beside the file.
+            try { File.Delete(temporary); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     /// <summary>Adds or removes the Stop hook that reads Claude's replies aloud.</summary>

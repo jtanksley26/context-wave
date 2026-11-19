@@ -347,8 +347,8 @@ public partial class MainWindow : Window
 
     private void UpdatePosition()
     {
-        var total = _tabs.Active?.Queue.Count ?? 0;
-        PositionText.Text = total == 0 ? "" : $"{_tabs.Active!.Queue.Position} / {total}";
+        var (current, total) = _tabs.Active?.Queue.Progress ?? (0, 0);
+        PositionText.Text = total == 0 ? "" : $"{current} / {total}";
     }
 
     private void FollowDiff(int sentenceId)

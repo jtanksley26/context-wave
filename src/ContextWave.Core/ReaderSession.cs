@@ -300,8 +300,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
 
     public PipeResult Status()
     {
-        var total = queue.Count;
-        var current = queue.Position;
+        var (current, total) = queue.Progress;
         var state = queue.StateName;
         return new PipeResult
         {
