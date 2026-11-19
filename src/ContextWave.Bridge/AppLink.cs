@@ -17,25 +17,26 @@ public sealed class AppLink(string pipeName, Func<bool> launchApp, TimeSpan star
     /// <exception cref="InvalidOperationException">The app is not running and could not be started.</exception>
     public async Task<PipeResponse> SendAsync(PipeRequest request, CancellationToken ct = default)
     {
-        try
+        // Null when the connect timed out, i.e. the request cannot have been delivered.
+        async Task<PipeResponse?> TrySendAsync(int connectMs)
         {
-            return await PipeClient.SendAsync(pipeName, request, 300, ct);
+            try
+            {
+                return await PipeClient.SendAsync(pipeName, request, connectMs, ct);
+            }
+            catch (TimeoutException)
+            {
+                return null;
+            }
         }
-        catch (TimeoutException)
-        {
-        }
+
+        if (await TrySendAsync(300) is { } sent) return sent;
 
         await _launchGate.WaitAsync(ct);
         try
         {
             // Another call may have started the app while this one waited for the gate.
-            try
-            {
-                return await PipeClient.SendAsync(pipeName, request, 300, ct);
-            }
-            catch (TimeoutException)
-            {
-            }
+            if (await TrySendAsync(300) is { } sentWhileWaiting) return sentWhileWaiting;
 
             if (!launchApp())
                 throw new InvalidOperationException(
@@ -44,13 +45,7 @@ public sealed class AppLink(string pipeName, Func<bool> launchApp, TimeSpan star
             var elapsed = Stopwatch.StartNew();
             while (elapsed.Elapsed < startupBudget)
             {
-                try
-                {
-                    return await PipeClient.SendAsync(pipeName, request, 500, ct);
-                }
-                catch (TimeoutException)
-                {
-                }
+                if (await TrySendAsync(500) is { } started) return started;
             }
             throw new InvalidOperationException(
                 $"Context Wave did not start within {startupBudget.TotalSeconds:0} seconds.");

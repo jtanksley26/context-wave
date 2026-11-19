@@ -29,6 +29,9 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
     /// <summary>The <see cref="Source"/> while one of Claude's replies is the current document.</summary>
     public const string ReplySource = "reply";
 
+    /// <summary>The <see cref="Source"/> while text Claude sent with speak is the current document.</summary>
+    public const string StreamSource = "stream";
+
     private static readonly HashSet<string> Extensions =
         new(StringComparer.OrdinalIgnoreCase) { ".md", ".markdown", ".txt" };
 
@@ -40,7 +43,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
     private readonly Dictionary<int, DiffAnchor> _anchors = [];
 
     /// <summary>
-    /// "" when empty, "stream" for text Claude sent with speak, "reply" for a reply read
+    /// "" when empty, <see cref="StreamSource"/> for text Claude sent with speak, <see cref="ReplySource"/> for a reply read
     /// automatically, otherwise the file path.
     /// </summary>
     public string Source { get; private set; } = "";
@@ -64,25 +67,25 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         {
             switch (request.Op)
             {
-                case "read_file":
+                case PipeOps.ReadFile:
                     RequireDrivePath(request.Path ?? "");
                     RequireVoice();
                     OpenFile(request.Path ?? "", hold);
                     return PipeResponse.Success(
                         $"{(hold ? "Waiting to read" : "Reading")} {Path.GetFileName(Source)} ({queue.Count} sentences).");
-                case "speak":
+                case PipeOps.Speak:
                     RequireVoice();
                     var spoken = Speak(request.Text ?? "", request.Mode ?? "append", request.Focus, hold);
                     var queued = $"Queued {spoken.Count} sentences{(hold ? " to read when this chat's turn comes" : "")}.";
                     return PipeResponse.Success(
                         spoken.FocusProblem is null ? queued : $"{queued} {spoken.FocusProblem}");
-                case "show_diff":
+                case PipeOps.ShowDiff:
                     var files = ShowDiff(request.Diff ?? "", request.Title);
                     return PipeResponse.Success($"Showing diff: {files} {(files == 1 ? "file" : "files")}.");
-                case "stop":
+                case PipeOps.Stop:
                     Stop();
                     return PipeResponse.Success("Stopped.");
-                case "status":
+                case PipeOps.Status:
                     return PipeResponse.Success(Status());
                 default:
                     return PipeResponse.Fail($"Unknown operation '{request.Op}'.");
@@ -170,13 +173,13 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
 
         if (replace)
         {
-            Source = "stream";
+            Source = StreamSource;
             DocumentReplaced?.Invoke(html);
             queue.Load(result.Sentences, voiceReady() && !hold);
         }
         else
         {
-            if (Source == ReplySource) Source = "stream";
+            if (Source == ReplySource) Source = StreamSource;
             DocumentAppended?.Invoke(html);
             queue.Append(result.Sentences, voiceReady() && !hold);
         }
@@ -257,7 +260,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         _anchors.Clear();
         _diff = parsed;
         DiffTitle = string.IsNullOrWhiteSpace(title) ? null : title.Trim();
-        Source = "stream";
+        Source = StreamSource;
         DocumentReplaced?.Invoke("");
         DiffReplaced?.Invoke(parsed.Html, DiffTitle);
         return parsed.Files.Count;
@@ -298,8 +301,8 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
     public PipeResult Status()
     {
         var total = queue.Count;
-        var current = total == 0 ? 0 : Math.Min(queue.CurrentIndex + 1, total);
-        var state = queue.State.ToString().ToLowerInvariant();
+        var current = queue.Position;
+        var state = queue.StateName;
         return new PipeResult
         {
             Message = $"{state}, sentence {current} of {total}",
@@ -311,14 +314,13 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
         };
     }
 
-    private int Replace(string markdown, string source, bool hold)
+    private void Replace(string markdown, string source, bool hold)
     {
         _document = new MarkdownDocument(Path.GetDirectoryName(source));
         var result = _document.Append(markdown, announceCodeBlocks());
         Source = source;
         DocumentReplaced?.Invoke(result.Html);
         queue.Load(result.Sentences, voiceReady() && !hold);
-        return result.Sentences.Count;
     }
 
     private void ClearDiff()

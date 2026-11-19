@@ -5,6 +5,19 @@ using System.Text.Json.Serialization;
 
 namespace ContextWave.Core;
 
+/// <summary>The <see cref="PipeRequest.Op"/> values.</summary>
+public static class PipeOps
+{
+    public const string ReadFile = "read_file";
+    public const string Speak = "speak";
+    public const string ShowDiff = "show_diff";
+    public const string Stop = "stop";
+    public const string Status = "status";
+    public const string SpeakReply = "speak_reply";
+    public const string Activate = "activate";
+    public const string OpenFile = "open_file";
+}
+
 public sealed record PipeRequest
 {
     public string Op { get; init; } = "";

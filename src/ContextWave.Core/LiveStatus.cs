@@ -34,11 +34,11 @@ public sealed record LiveSnapshot(
         var total = queue.Count;
         var (nearby, at) = queue.TextsAround(Before, After);
         return new LiveSnapshot(
-            queue.State.ToString().ToLowerInvariant(),
+            queue.StateName,
             tab.Title,
             tab.Session.Source,
             queue.CurrentText ?? "",
-            total == 0 ? 0 : Math.Min(queue.CurrentIndex + 1, total),
+            queue.Position,
             total,
             frame.Level,
             frame.Bands,

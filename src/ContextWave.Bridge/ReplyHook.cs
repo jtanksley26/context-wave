@@ -46,7 +46,7 @@ public static class ReplyHook
             }
             var response = await send(new PipeRequest
             {
-                Op = "speak_reply",
+                Op = PipeOps.SpeakReply,
                 Text = reply,
                 Session = stop.SessionId,
                 Folder = stop.Folder,

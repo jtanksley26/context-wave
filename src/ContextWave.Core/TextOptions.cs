@@ -89,10 +89,8 @@ public static class TextOptions
     {
         var fonts = AvailableFonts(installedFamilies);
         var font = fonts.FirstOrDefault(f => f.Id == fontId) ?? fonts.First(f => f.Id == DefaultFontId);
-        var width = Widths.Any(w => w.Id == widthId) ? Widths.First(w => w.Id == widthId) : Widths.First(w => w.Id == DefaultWidthId);
-        var spacing = Spacings.Any(s => s.Id == spacingId)
-            ? Spacings.First(s => s.Id == spacingId)
-            : Spacings.First(s => s.Id == DefaultSpacingId);
+        var width = Widths.FirstOrDefault(w => w.Id == widthId, Widths.First(w => w.Id == DefaultWidthId));
+        var spacing = Spacings.FirstOrDefault(s => s.Id == spacingId, Spacings.First(s => s.Id == DefaultSpacingId));
         return new ResolvedText(NormalizeSize(sizePercent), font, width.Id, width.Css, spacing.Id, spacing.Css);
     }
 }

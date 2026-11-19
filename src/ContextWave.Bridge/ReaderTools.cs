@@ -17,7 +17,7 @@ public sealed class ReaderTools(AppLink link)
     public Task<string> ReadFile(
         [Description("Absolute path to a .md, .markdown or .txt file.")] string path,
         CancellationToken ct) =>
-        Call(new PipeRequest { Op = "read_file", Path = path }, ct);
+        Call(new PipeRequest { Op = PipeOps.ReadFile, Path = path }, ct);
 
     [McpServerTool(Name = "speak")]
     [Description(
@@ -38,7 +38,7 @@ public sealed class ReaderTools(AppLink link)
             "version of the file. One call, one focus: start a new call when you move to another place.")]
         string? focus = null,
         CancellationToken ct = default) =>
-        Call(new PipeRequest { Op = "speak", Text = text, Mode = mode, Focus = focus }, ct);
+        Call(new PipeRequest { Op = PipeOps.Speak, Text = text, Mode = mode, Focus = focus }, ct);
 
     [McpServerTool(Name = "show_diff")]
     [Description(
@@ -52,17 +52,17 @@ public sealed class ReaderTools(AppLink link)
         [Description("Optional short title for the window, such as the pull request name.")]
         string? title = null,
         CancellationToken ct = default) =>
-        Call(new PipeRequest { Op = "show_diff", Diff = diff, Title = title }, ct);
+        Call(new PipeRequest { Op = PipeOps.ShowDiff, Diff = diff, Title = title }, ct);
 
     [McpServerTool(Name = "stop")]
     [Description("Stop reading and clear the Context Wave document and queue.")]
-    public Task<string> Stop(CancellationToken ct) => Call(new PipeRequest { Op = "stop" }, ct);
+    public Task<string> Stop(CancellationToken ct) => Call(new PipeRequest { Op = PipeOps.Stop }, ct);
 
     [McpServerTool(Name = "status")]
     [Description(
         "Report whether Context Wave is playing, paused or idle, what it is reading, its position, and " +
         "whether a diff is shown.")]
-    public Task<string> Status(CancellationToken ct) => Call(new PipeRequest { Op = "status" }, ct);
+    public Task<string> Status(CancellationToken ct) => Call(new PipeRequest { Op = PipeOps.Status }, ct);
 
     private static readonly TimeSpan ReplyTimeout = TimeSpan.FromSeconds(30);
 

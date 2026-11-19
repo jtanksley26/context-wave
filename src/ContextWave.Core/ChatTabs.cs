@@ -38,6 +38,9 @@ public sealed class ChatTab
     /// <summary>The Claude Code session the tab belongs to, or null.</summary>
     public string? SessionId { get; internal set; }
 
+    /// <summary>The file the tab was opened for, or null when it belongs to a chat.</summary>
+    public string? FilePath { get; internal set; }
+
     /// <summary>The chat's working folder, or null.</summary>
     public string? Folder { get; internal set; }
 
@@ -140,35 +143,35 @@ public sealed class ChatTabs
     {
         switch (request.Op)
         {
-            case "activate":
+            case PipeOps.Activate:
                 ActivateRequested?.Invoke();
                 return PipeResponse.Success("Activated.");
-            case "speak_reply":
+            case PipeOps.SpeakReply:
                 // Always a success: a skipped reply is normal, and the hook must not see an error.
                 return PipeResponse.Success(Reply(request));
-            case "open_file":
+            case PipeOps.OpenFile:
                 return OpenHandedOverFile(request.Path ?? "");
         }
 
         var existing = ToolTab(request, create: false);
-        if (request.Op is not ("read_file" or "speak" or "show_diff"))
+        if (request.Op is not (PipeOps.ReadFile or PipeOps.Speak or PipeOps.ShowDiff))
         {
             // Status and stop never open a tab or reach another chat's tab.
             if (existing is not null)
             {
                 var result = existing.Session.Handle(request);
                 // Being told to stop ends the front tab's turn just as finishing does.
-                if (request.Op == "stop" && existing == Active) MoveToNext();
+                if (request.Op == PipeOps.Stop && existing == Active) MoveToNext();
                 return result;
             }
             return request.Op switch
             {
-                "status" => PipeResponse.Success(new PipeResult
+                PipeOps.Status => PipeResponse.Success(new PipeResult
                 {
                     Message = "idle, sentence 0 of 0", State = "idle", Source = "",
                     CurrentSentence = 0, TotalSentences = 0, DiffFiles = 0,
                 }),
-                "stop" => PipeResponse.Success("Stopped."),
+                PipeOps.Stop => PipeResponse.Success("Stopped."),
                 _ => PipeResponse.Fail($"Unknown operation '{request.Op}'."),
             };
         }
@@ -211,6 +214,7 @@ public sealed class ChatTabs
         var key = $"file:{path}";
         var existing = Find(key);
         var tab = existing ?? Open(key, Path.GetFileName(path));
+        tab.FilePath = path;
         var previous = Active;
         var wasPlaying = previous?.Queue.State == ReadingState.Playing;
         Select(tab);
