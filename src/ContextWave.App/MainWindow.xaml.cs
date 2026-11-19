@@ -297,7 +297,7 @@ public partial class MainWindow : Window
 
     private static string TabToolTip(ChatTab tab)
     {
-        if (tab.Key.StartsWith("file:", StringComparison.Ordinal)) return tab.Key["file:".Length..];
+        if (tab.FilePath is { } path) return path;
         var lines = new List<string>();
         if (tab.ChatName is { } name) lines.Add(name);
         if (tab.Folder is { } folder) lines.Add(folder);
@@ -347,8 +347,8 @@ public partial class MainWindow : Window
 
     private void UpdatePosition()
     {
-        var total = _tabs.Active?.Queue.Count ?? 0;
-        PositionText.Text = total == 0 ? "" : $"{Math.Min(_tabs.Active!.Queue.CurrentIndex + 1, total)} / {total}";
+        var (current, total) = _tabs.Active?.Queue.Progress ?? (0, 0);
+        PositionText.Text = total == 0 ? "" : $"{current} / {total}";
     }
 
     private void FollowDiff(int sentenceId)
@@ -409,12 +409,7 @@ public partial class MainWindow : Window
 
     private void BuildThemeMenus()
     {
-        foreach (var (id, name) in ThemeCatalog.ThemeChoices)
-        {
-            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
-            item.Click += OnThemeClick;
-            ThemeMenu.Items.Add(item);
-        }
+        AddChoices(ThemeMenu, ThemeCatalog.ThemeChoices, id => _settings.Theme = id, ApplyTheme);
 
         foreach (var highlight in ThemeCatalog.Highlights)
         {
@@ -443,7 +438,7 @@ public partial class MainWindow : Window
 
         // Clicking a checkable item toggles it first, so set every tick from the settings.
         var themeId = ThemeCatalog.IsSystem(_settings.Theme) ? ThemeCatalog.SystemId : _settings.Theme;
-        foreach (MenuItem item in ThemeMenu.Items) item.IsChecked = (string)item.Tag == themeId;
+        Tick(ThemeMenu, themeId);
         foreach (MenuItem item in HighlightMenu.Items)
         {
             var id = (string)item.Tag;
@@ -459,17 +454,22 @@ public partial class MainWindow : Window
     private void BuildTextMenus()
     {
         AddChoices(TextSizeMenu, TextOptions.Sizes.Select(size => (size.ToString(), $"{size}%")),
-            id => _settings.TextSize = int.Parse(id));
+            id => _settings.TextSize = int.Parse(id), ApplyText);
         AddChoices(FontMenu, TextOptions.AvailableFonts(_installedFonts).Select(font => (font.Id, font.DisplayName)),
-            id => _settings.Font = id);
+            id => _settings.Font = id, ApplyText);
         AddChoices(WidthMenu, TextOptions.Widths.Select(width => (width.Id, width.DisplayName)),
-            id => _settings.ColumnWidth = id);
+            id => _settings.ColumnWidth = id, ApplyText);
         AddChoices(SpacingMenu, TextOptions.Spacings.Select(spacing => (spacing.Id, spacing.DisplayName)),
-            id => _settings.LineSpacing = id);
+            id => _settings.LineSpacing = id, ApplyText);
     }
 
-    /// <summary>Fills a submenu with checkable choices; picking one stores it and re-applies the text.</summary>
-    private void AddChoices(MenuItem menu, IEnumerable<(string Id, string Name)> choices, Action<string> store)
+    /// <summary>
+    /// Fills a submenu with checkable choices; picking one stores it, saves the settings and runs
+    /// <paramref name="apply"/>, which sets the menu's ticks again from the settings (a click toggles
+    /// the item first, so clicking the ticked one would otherwise untick it).
+    /// </summary>
+    private void AddChoices(
+        MenuItem menu, IEnumerable<(string Id, string Name)> choices, Action<string> store, Action apply)
     {
         foreach (var (id, name) in choices)
         {
@@ -478,7 +478,7 @@ public partial class MainWindow : Window
             {
                 store(id);
                 SaveSettings();
-                ApplyText();
+                apply();
             };
             menu.Items.Add(item);
         }
@@ -539,24 +539,9 @@ public partial class MainWindow : Window
 
     private void BuildRepliesMenu()
     {
-        AddChoices(RepliesMenu, ReplyMode.Choices, id => _settings.Replies = id);
-        AddChoices(WhenPlayingMenu, WhenPlaying.Choices, id => _settings.WhenPlaying = id);
+        AddChoices(RepliesMenu, ReplyMode.Choices, id => _settings.Replies = id, TickReplies);
+        AddChoices(WhenPlayingMenu, WhenPlaying.Choices, id => _settings.WhenPlaying = id, TickReplies);
         TickReplies();
-
-        void AddChoices(MenuItem menu, IReadOnlyList<(string Id, string DisplayName)> choices, Action<string> set)
-        {
-            foreach (var (id, name) in choices)
-            {
-                var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
-                item.Click += (_, _) =>
-                {
-                    set(id);
-                    SaveSettings();
-                    TickReplies();
-                };
-                menu.Items.Add(item);
-            }
-        }
     }
 
     /// <summary>Clicking a checkable item toggles it first, so set every tick from the settings.</summary>
@@ -568,19 +553,14 @@ public partial class MainWindow : Window
 
     private void BuildVisualizerMenu()
     {
-        foreach (var (id, name) in VisualizerCatalog.Choices)
-        {
-            var item = new MenuItem { Header = name, Tag = id, IsCheckable = true };
-            item.Click += OnVisualizerClick;
-            VisualizerMenu.Items.Add(item);
-        }
+        AddChoices(VisualizerMenu, VisualizerCatalog.Choices, id => _settings.Visualizer = id, ApplyVisualizer);
     }
 
     /// <summary>Shows the chosen style and runs the timer only while the visualiser is on.</summary>
     private void ApplyVisualizer()
     {
         var id = VisualizerCatalog.Normalize(_settings.Visualizer);
-        foreach (MenuItem item in VisualizerMenu.Items) item.IsChecked = (string)item.Tag == id;
+        Tick(VisualizerMenu, id);
         _view.SetVisualizer(id);
 
         if (id == VisualizerCatalog.OffId)
@@ -592,20 +572,6 @@ public partial class MainWindow : Window
         {
             _visualizerTimer.Start();
         }
-    }
-
-    private void OnVisualizerClick(object sender, RoutedEventArgs e)
-    {
-        _settings.Visualizer = (string)((MenuItem)sender).Tag;
-        SaveSettings();
-        ApplyVisualizer();
-    }
-
-    private void OnThemeClick(object sender, RoutedEventArgs e)
-    {
-        _settings.Theme = (string)((MenuItem)sender).Tag;
-        SaveSettings();
-        ApplyTheme();
     }
 
     private void OnHighlightClick(object sender, RoutedEventArgs e)

@@ -533,6 +533,8 @@ public sealed class ChatTabsTests : IDisposable
 
         Assert.Equal(2, _tabs.Tabs.Count);
         Assert.Equal("notes.md", tab.Title);
+        Assert.Equal(path, tab.FilePath);
+        Assert.Null(Tab("s1").FilePath);
         Assert.Same(tab, _tabs.Active);
         Assert.Equal(ReadingState.Idle, Tab("s1").Queue.State);
     }

@@ -49,6 +49,25 @@ public class ReadingQueueTests
     }
 
     [Fact]
+    public async Task Progress_is_zero_when_empty_one_based_while_reading_and_stays_on_the_last_when_done()
+    {
+        var queue = Create();
+        Assert.Equal((0, 0), queue.Progress);
+
+        queue.Load(Make(3), autoPlay: false);
+        Assert.Equal((1, 3), queue.Progress);
+
+        queue.JumpTo(1);
+        queue.Pause();
+        Assert.Equal((2, 3), queue.Progress);
+
+        var finished = NextFinished(queue);
+        queue.Play();
+        await finished;
+        Assert.Equal((3, 3), queue.Progress);
+    }
+
+    [Fact]
     public async Task Load_plays_every_sentence_in_order_then_finishes()
     {
         var queue = Create();

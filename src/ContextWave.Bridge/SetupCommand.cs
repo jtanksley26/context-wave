@@ -59,13 +59,19 @@ public static class SetupCommand
         }
 
         if (ApplyReplyHook(exe, remove) != 0) exitCode = 1;
+        if (ApplyDesktopConfig(exe, remove) != 0) exitCode = 1;
+        return exitCode;
+    }
 
+    /// <summary>Adds or removes the md-reader entry in the Claude desktop app's config.</summary>
+    private static int ApplyDesktopConfig(string exe, bool remove)
+    {
         var directory = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "Claude");
         if (!Directory.Exists(directory))
         {
             Console.WriteLine("Claude desktop app: not installed; skipped.");
-            return exitCode;
+            return 0;
         }
 
         var file = Path.Combine(directory, "claude_desktop_config.json");
@@ -76,34 +82,54 @@ public static class SetupCommand
             {
                 // Nothing to remove: do not create, rewrite or back up anything.
                 Console.WriteLine("Claude desktop app: md-reader was not registered.");
-                return exitCode;
+                return 0;
             }
 
             var updated = DesktopConfig.Apply(existing, exe, remove);
             if (updated == existing)
             {
                 Console.WriteLine("Claude desktop app: md-reader is already registered.");
-                return exitCode;
+                return 0;
             }
 
-            if (existing is not null)
-            {
-                var backup = $"{file}.bak-{DateTime.Now:yyyyMMddHHmmss}";
-                File.Copy(file, backup);
-                Console.WriteLine($"Claude desktop app: backup saved to {backup}");
-            }
-            File.WriteAllText(file, updated);
+            if (existing is not null) Backup(file, "Claude desktop app");
+            WriteAtomically(file, updated);
             Console.WriteLine(remove
                 ? "Claude desktop app: removed md-reader. Restart the app to apply."
                 : "Claude desktop app: registered md-reader. Restart the app to apply.");
+            return 0;
         }
         catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException
                                        or ArgumentException or UnauthorizedAccessException)
         {
             Console.WriteLine($"Claude desktop app: config left unchanged ({ex.Message}).");
-            exitCode = 1;
+            return 1;
         }
-        return exitCode;
+    }
+
+    /// <summary>Copies a file to a timestamped backup beside it and says where.</summary>
+    private static void Backup(string file, string label)
+    {
+        var backup = $"{file}.bak-{DateTime.Now:yyyyMMddHHmmss}";
+        File.Copy(file, backup);
+        Console.WriteLine($"{label}: backup saved to {backup}");
+    }
+
+    /// <summary>Writes beside the file and swaps it in, so a failure cannot leave it half-written.</summary>
+    private static void WriteAtomically(string file, string text)
+    {
+        var temporary = file + ".contextwave-tmp";
+        try
+        {
+            File.WriteAllText(temporary, text);
+            File.Move(temporary, file, overwrite: true);
+        }
+        catch
+        {
+            // Leave nothing half-written beside the file.
+            try { File.Delete(temporary); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+            throw;
+        }
     }
 
     /// <summary>Adds or removes the Stop hook that reads Claude's replies aloud.</summary>
@@ -139,16 +165,8 @@ public static class SetupCommand
                 return 0;
             }
 
-            if (existing is not null)
-            {
-                var backup = $"{file}.bak-{DateTime.Now:yyyyMMddHHmmss}";
-                File.Copy(file, backup);
-                Console.WriteLine($"Claude Code replies hook: backup saved to {backup}");
-            }
-            // Write beside the file and swap it in, so a failure cannot leave the settings half-written.
-            var temporary = file + ".contextwave-tmp";
-            File.WriteAllText(temporary, updated);
-            File.Move(temporary, file, overwrite: true);
+            if (existing is not null) Backup(file, "Claude Code replies hook");
+            WriteAtomically(file, updated);
             Console.WriteLine(remove
                 ? "Claude Code replies hook: removed. Start a new Claude Code session to apply."
                 : "Claude Code replies hook: installed. Start a new Claude Code session to apply, " +

@@ -52,6 +52,25 @@ public sealed class ReadingQueue
     public int CurrentIndex { get { lock (_gate) return _index; } }
     public int Count { get { lock (_gate) return _sentences.Count; } }
 
+    /// <summary>"idle", "playing" or "paused".</summary>
+    public string StateName => State.ToString().ToLowerInvariant();
+
+    /// <summary>
+    /// The 1-based position of the current sentence (0 when there are none) and the number of
+    /// sentences, read together so the two always agree.
+    /// </summary>
+    public (int Current, int Total) Progress
+    {
+        get
+        {
+            lock (_gate)
+            {
+                var total = _sentences.Count;
+                return (total == 0 ? 0 : Math.Min(_index + 1, total), total);
+            }
+        }
+    }
+
     /// <summary>The id of the sentence at a position, or null when there is none.</summary>
     public int? SentenceIdAt(int index)
     {

@@ -31,14 +31,14 @@ public sealed record LiveSnapshot(
     {
         if (tab is null) return Idle with { Level = frame.Level, Bands = frame.Bands };
         var queue = tab.Queue;
-        var total = queue.Count;
+        var (current, total) = queue.Progress;
         var (nearby, at) = queue.TextsAround(Before, After);
         return new LiveSnapshot(
-            queue.State.ToString().ToLowerInvariant(),
+            queue.StateName,
             tab.Title,
             tab.Session.Source,
             queue.CurrentText ?? "",
-            total == 0 ? 0 : Math.Min(queue.CurrentIndex + 1, total),
+            current,
             total,
             frame.Level,
             frame.Bands,

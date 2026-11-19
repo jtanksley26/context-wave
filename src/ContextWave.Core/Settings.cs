@@ -7,7 +7,7 @@ public sealed class Settings
 {
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
 
-    public string ModelId { get; set; } = "kokoro-en-v0_19";
+    public string ModelId { get; set; } = VoiceCatalog.Kokoro.Id;
     public int SpeakerId { get; set; } = 1;
     public float Speed { get; set; } = 1.0f;
     public bool AnnounceCodeBlocks { get; set; } = true;
@@ -32,7 +32,7 @@ public sealed class Settings
             if (File.Exists(path))
             {
                 var loaded = Parse(File.ReadAllText(path));
-                if (string.IsNullOrEmpty(loaded.ModelId)) loaded.ModelId = "kokoro-en-v0_19";
+                if (string.IsNullOrEmpty(loaded.ModelId)) loaded.ModelId = VoiceCatalog.Kokoro.Id;
                 if (loaded.SpeakerId < 0) loaded.SpeakerId = 0;
                 // Unknown ids are kept as written; ThemeCatalog.Resolve treats them as the defaults.
                 if (string.IsNullOrEmpty(loaded.Theme)) loaded.Theme = ThemeCatalog.SystemId;
