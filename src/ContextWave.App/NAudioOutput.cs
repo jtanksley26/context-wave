@@ -3,7 +3,6 @@ using System.Runtime.InteropServices;
 using ContextWave.Core;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
-using NAudio.Wave.SampleProviders;
 
 namespace ContextWave.App;
 
@@ -22,7 +21,7 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
     public async Task PlayAsync(AudioClip clip, CancellationToken ct)
     {
         // WasapiOut stops without draining, which can clip the end; pad with 120 ms of silence.
-        var source = new ClipProvider(clip, clip.SampleRate * 120 / 1000);
+        var source = new ClipWaveProvider(clip, clip.SampleRate * 120 / 1000);
         using var device = new WasapiOut(AudioClientShareMode.Shared, 50);
 
         var done = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -31,7 +30,7 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
             if (e.Exception is not null) done.TrySetException(e.Exception);
             else done.TrySetResult();
         };
-        device.Init(new SampleToWaveProvider(source));
+        device.Init(source);
 
         lock (_lock)
         {
@@ -110,27 +109,34 @@ public sealed class NAudioOutput : IAudioOutput, IPlaybackProbe, IDisposable
     {
         lock (_lock) _current?.Stop();
     }
+}
 
-    /// <summary>
-    /// Plays a clip's samples where they are, then <paramref name="padding"/> samples of silence.
-    /// A copy into a byte buffer would put a second clip-sized array on the large object heap for
-    /// every sentence.
-    /// </summary>
-    private sealed class ClipProvider(AudioClip clip, int padding) : ISampleProvider
+/// <summary>
+/// Plays a clip's samples where they are, as 32-bit float audio, then <paramref name="padding"/>
+/// samples of silence. A copy into a byte buffer would put a second clip-sized array on the large
+/// object heap for every sentence.
+/// </summary>
+/// <remarks>
+/// Bytes, not an ISampleProvider: NAudio hands a sample provider a byte[] posing as a float[],
+/// which Array.Copy and Array.Clear reject or misread.
+/// </remarks>
+public sealed class ClipWaveProvider(AudioClip clip, int padding) : IWaveProvider
+{
+    private readonly int _clipBytes = clip.Samples.Length * sizeof(float);
+    private readonly int _totalBytes = (clip.Samples.Length + padding) * sizeof(float);
+    private int _position;
+
+    public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(clip.SampleRate, 1);
+
+    public int Read(byte[] buffer, int offset, int count)
     {
-        private int _position;
-
-        public WaveFormat WaveFormat { get; } = WaveFormat.CreateIeeeFloatWaveFormat(clip.SampleRate, 1);
-
-        public int Read(float[] buffer, int offset, int count)
-        {
-            var read = Math.Min(count, clip.Samples.Length + padding - _position);
-            if (read <= 0) return 0;
-            var fromClip = Math.Clamp(clip.Samples.Length - _position, 0, read);
-            Array.Copy(clip.Samples, _position, buffer, offset, fromClip);
-            Array.Clear(buffer, offset + fromClip, read - fromClip);
-            _position += read;
-            return read;
-        }
+        var read = Math.Min(count, _totalBytes - _position);
+        if (read <= 0) return 0;
+        var fromClip = Math.Clamp(_clipBytes - _position, 0, read);
+        // BlockCopy refuses a start past the end of the clip even for nothing, as in the padding.
+        if (fromClip > 0) Buffer.BlockCopy(clip.Samples, _position, buffer, offset, fromClip);
+        Array.Clear(buffer, offset + fromClip, read - fromClip);
+        _position += read;
+        return read;
     }
 }
