@@ -92,8 +92,9 @@ public static class SetupCommand
                 return 0;
             }
 
-            if (existing is not null) Backup(file, "Claude desktop app");
-            WriteAtomically(file, updated);
+            if (existing is not null)
+                Console.WriteLine($"Claude desktop app: backup saved to {ConfigFile.Backup(file)}");
+            ConfigFile.WriteAtomically(file, updated);
             Console.WriteLine(remove
                 ? "Claude desktop app: removed md-reader. Restart the app to apply."
                 : "Claude desktop app: registered md-reader. Restart the app to apply.");
@@ -104,31 +105,6 @@ public static class SetupCommand
         {
             Console.WriteLine($"Claude desktop app: config left unchanged ({ex.Message}).");
             return 1;
-        }
-    }
-
-    /// <summary>Copies a file to a timestamped backup beside it and says where.</summary>
-    private static void Backup(string file, string label)
-    {
-        var backup = $"{file}.bak-{DateTime.Now:yyyyMMddHHmmss}";
-        File.Copy(file, backup);
-        Console.WriteLine($"{label}: backup saved to {backup}");
-    }
-
-    /// <summary>Writes beside the file and swaps it in, so a failure cannot leave it half-written.</summary>
-    private static void WriteAtomically(string file, string text)
-    {
-        var temporary = file + ".contextwave-tmp";
-        try
-        {
-            File.WriteAllText(temporary, text);
-            File.Move(temporary, file, overwrite: true);
-        }
-        catch
-        {
-            // Leave nothing half-written beside the file.
-            try { File.Delete(temporary); } catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
-            throw;
         }
     }
 
@@ -146,38 +122,26 @@ public static class SetupCommand
             return 0;
         }
 
-        var file = Path.Combine(directory, "settings.json");
-        try
+        var result = ClaudeSettingsFile.Update(directory, exe, remove);
+        if (result.BackupPath is not null)
+            Console.WriteLine($"Claude Code replies hook: backup saved to {result.BackupPath}");
+        switch (result.Outcome)
         {
-            var existing = File.Exists(file) ? File.ReadAllText(file) : null;
-            if (remove && !ClaudeSettings.HasHook(existing))
-            {
+            case ClaudeSettingsFile.Outcome.NotInstalled:
                 Console.WriteLine("Claude Code replies hook: was not installed.");
                 return 0;
-            }
-
-            var updated = ClaudeSettings.Apply(existing, exe, remove);
-            if (!string.IsNullOrWhiteSpace(existing)
-                && System.Text.Json.Nodes.JsonNode.DeepEquals(
-                    System.Text.Json.Nodes.JsonNode.Parse(existing), System.Text.Json.Nodes.JsonNode.Parse(updated)))
-            {
+            case ClaudeSettingsFile.Outcome.AlreadyInstalled:
                 Console.WriteLine("Claude Code replies hook: already installed.");
                 return 0;
-            }
-
-            if (existing is not null) Backup(file, "Claude Code replies hook");
-            WriteAtomically(file, updated);
-            Console.WriteLine(remove
-                ? "Claude Code replies hook: removed. Start a new Claude Code session to apply."
-                : "Claude Code replies hook: installed. Start a new Claude Code session to apply, " +
-                  "then choose a mode under Settings > Auto Read in Context Wave.");
-            return 0;
-        }
-        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException
-                                       or ArgumentException or UnauthorizedAccessException)
-        {
-            Console.WriteLine($"Claude Code replies hook: settings left unchanged ({ex.Message}).");
-            return 1;
+            case ClaudeSettingsFile.Outcome.Failed:
+                Console.WriteLine($"Claude Code replies hook: settings left unchanged ({result.Error}).");
+                return 1;
+            default:
+                Console.WriteLine(remove
+                    ? "Claude Code replies hook: removed. Start a new Claude Code session to apply."
+                    : "Claude Code replies hook: installed. Start a new Claude Code session to apply, " +
+                      "then choose a mode under Settings > Auto Read in Context Wave.");
+                return 0;
         }
     }
 
