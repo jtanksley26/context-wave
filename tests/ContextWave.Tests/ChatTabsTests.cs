@@ -147,6 +147,29 @@ public sealed class ChatTabsTests : IDisposable
 
         await PlayUntil(() => Heard("Read this request."));
         Assert.Equal("s2", _tabs.Active!.SessionId);
+        // The chat is read from its request, not from the older reply the failed call passed over.
+        Assert.False(Heard("Reply."));
+        Assert.Equal("Read this request.".Length, _output.Played.First(clip => clip.Samples[0] != "One.".Length).Samples[0]);
+    }
+
+    [Fact]
+    public async Task A_failed_tool_call_keeps_the_chat_ahead_of_a_later_request()
+    {
+        Reply("s1", "One.", "a", "100@1");
+        Reply("s2", "Reply.", "b", "200@1");
+        Reply("s3", "Other.", "c", "300@1");
+        _whenPlaying = "wait";
+        Speak("First request.", "200@1");
+        Speak("Second request.", "300@1");
+        _whenPlaying = "interrupt";
+
+        _tabs.Handle(new PipeRequest { Op = "read_file", Path = Path.Combine(_dir, "missing.md"), Process = "200@1" });
+        Assert.Equal("s1", _tabs.Active!.SessionId);
+        Tab("s1").Queue.Next();
+
+        await PlayUntil(() => Heard("First request."));
+        Assert.Equal("s2", _tabs.Active!.SessionId);
+        Assert.False(Heard("Second request."));
     }
 
     [Fact]
@@ -439,6 +462,23 @@ public sealed class ChatTabsTests : IDisposable
         Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
         Assert.Equal(2, Tab("s1").Queue.Count);
         Assert.Contains("data-sid", Tab("s1").Html);
+    }
+
+    [Fact]
+    public void Stop_from_a_background_chat_with_a_tab_leaves_the_front_tab_reading()
+    {
+        Reply("s1", "One. Two.", "a", "100@1");
+        Reply("s2", "Reply.", "b", "200@1");
+        _whenPlaying = "wait";
+        Speak("Read this request.", "200@1");
+
+        var stop = _tabs.Handle(new PipeRequest { Op = "stop", Process = "200@1" });
+
+        Assert.True(stop.Ok);
+        Assert.Equal("s1", _tabs.Active!.SessionId);
+        Assert.Equal(ReadingState.Playing, Tab("s1").Queue.State);
+        Assert.Equal(2, Tab("s1").Queue.Count);
+        Assert.Equal(0, Tab("s2").Queue.Count);
     }
 
     [Fact]
