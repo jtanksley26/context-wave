@@ -305,18 +305,59 @@ public partial class MainWindow : Window
             _tabs.Close(tab);
         };
 
-        var header = new Border
+        var content = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, title, close } };
+        var tip = TabToolTip(tab);
+        FrameworkElement header;
+        if (inFront)
         {
-            Child = new StackPanel { Orientation = Orientation.Horizontal, Children = { dot, title, close } },
-            Padding = new Thickness(10, 4, 4, 4),
-            Margin = new Thickness(0, 0, 4, 0),
-            BorderThickness = new Thickness(1, 1, 1, 0),
-            CornerRadius = new CornerRadius(4, 4, 0, 0),
-            Cursor = Cursors.Hand,
-            ToolTip = TabToolTip(tab),
-        };
-        header.SetResourceReference(Border.BackgroundProperty, inFront ? "PageBrush" : "ChromeBrush");
-        header.SetResourceReference(Border.BorderBrushProperty, "ControlBorderBrush");
+            // An accent bar on top and the page's own background, with no line beneath, so the tab joins the page.
+            // Every tab is 3px at the top and 1px at the bottom (the strip's line), so titles line up.
+            var bar = new Border
+            {
+                Child = content,
+                Padding = new Thickness(10, 4, 4, 5),
+                BorderThickness = new Thickness(0, 3, 0, 0),
+                CornerRadius = new CornerRadius(3, 3, 0, 0),
+            };
+            bar.SetResourceReference(Border.BackgroundProperty, "PageBrush");
+            bar.SetResourceReference(Border.BorderBrushProperty, "AccentBrush");
+            var frame = new Border
+            {
+                Child = bar,
+                Margin = new Thickness(0, 0, 4, 0),
+                BorderThickness = new Thickness(1, 0, 1, 0),
+                CornerRadius = new CornerRadius(4, 4, 0, 0),
+            };
+            frame.SetResourceReference(Border.BorderBrushProperty, "ControlBorderBrush");
+            header = frame;
+        }
+        else
+        {
+            title.Opacity = 0.65;
+            var back = new Border
+            {
+                Child = content,
+                Padding = new Thickness(10, 6, 4, 4),
+                Margin = new Thickness(0, 0, 4, 0),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4, 4, 0, 0),
+            };
+            back.SetResourceReference(Border.BackgroundProperty, "ChromeBrush");
+            back.SetResourceReference(Border.BorderBrushProperty, "ControlBorderBrush");
+            back.MouseEnter += (_, _) =>
+            {
+                title.Opacity = 1;
+                back.SetResourceReference(Border.BackgroundProperty, "ControlHoverBrush");
+            };
+            back.MouseLeave += (_, _) =>
+            {
+                title.Opacity = 0.65;
+                back.SetResourceReference(Border.BackgroundProperty, "ChromeBrush");
+            };
+            header = back;
+        }
+        header.Cursor = Cursors.Hand;
+        header.ToolTip = tip;
         header.MouseLeftButtonUp += (_, _) => _tabs.Select(tab);
         header.MouseUp += (_, e) =>
         {
