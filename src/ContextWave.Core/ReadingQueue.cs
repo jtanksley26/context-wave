@@ -247,6 +247,8 @@ public sealed class ReadingQueue
         lock (_gate)
         {
             if (_sentences.Count == 0) return;
+            // Already read to the end: finishing again would bring the next chat forward a second time.
+            if (delta > 0 && _index >= _sentences.Count) return;
             // A deliberate move starts afresh: a stall must never rewind to a pre-move position.
             _failStreak = 0;
             var target = Math.Max(0, _index + delta);

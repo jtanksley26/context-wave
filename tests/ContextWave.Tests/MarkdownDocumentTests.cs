@@ -148,6 +148,77 @@ public class MarkdownDocumentTests
         }
     }
 
+    [Theory]
+    [InlineData(@"<\\host\share\a.png>")]
+    [InlineData("<//host/share/a.png>")]
+    [InlineData(@"<\\?\UNC\host\a.png>")]
+    public void Images_on_a_network_or_device_path_are_dropped_from_the_page(string destination)
+    {
+        var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
+        try
+        {
+            var html = new MarkdownDocument(imageFolder: dir).Append($"![x]({destination})").Html;
+
+            // The page must never be told to fetch the host, and nothing may be embedded.
+            Assert.Contains("<img", html);
+            Assert.DoesNotContain("host", html);
+            Assert.DoesNotContain("data:", html);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("%5C%5Chost%5Cshare%5Ca.png")]
+    [InlineData("%2F%2Fhost%2Fshare%2Fa.png")]
+    public void Escaped_network_paths_in_images_are_never_read(string destination)
+    {
+        var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
+        try
+        {
+            var html = new MarkdownDocument(imageFolder: dir).Append($"![x]({destination})").Html;
+
+            // Left as an inert relative reference (the page has no base URL), but never embedded.
+            Assert.Contains($"src=\"{destination}\"", html);
+            Assert.DoesNotContain("data:", html);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void An_image_on_another_drive_is_never_read()
+    {
+        var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
+        try
+        {
+            var html = new MarkdownDocument(imageFolder: dir).Append("![x](C:/x.png)").Html;
+
+            // A scheme-like drive prefix is stripped from the page, as any unsafe scheme is.
+            Assert.Contains("<img", html);
+            Assert.DoesNotContain("C:", html);
+            Assert.DoesNotContain("data:", html);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("//host/share/x.md")]
+    [InlineData(@"<\\host\share\x.md>")]
+    public void Links_to_a_network_path_are_not_kept_relative(string destination)
+    {
+        var html = Parse($"[x]({destination})").Html;
+
+        Assert.DoesNotContain("host", html);
+    }
+
     [Fact]
     public void Images_are_not_embedded_without_a_document_folder() =>
         Assert.Contains("src=\"cat.png\"", Parse("![A cat](cat.png)").Html);

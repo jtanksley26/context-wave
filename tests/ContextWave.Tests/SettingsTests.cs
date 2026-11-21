@@ -10,6 +10,18 @@ public sealed class SettingsTests : IDisposable
     public void Dispose() => Directory.Delete(_dir, recursive: true);
 
     [Fact]
+    public void Save_never_leaves_a_half_written_file()
+    {
+        new Settings { SpeakerId = 2 }.Save(File_);
+        Assert.False(System.IO.File.Exists(File_ + ".tmp"));
+
+        // Writing beside the file fails (a folder is in the way): the saved settings stay as they were.
+        Directory.CreateDirectory(File_ + ".tmp");
+        Assert.ThrowsAny<Exception>(() => new Settings { SpeakerId = 3 }.Save(File_));
+        Assert.Equal(2, Settings.Load(File_).SpeakerId);
+    }
+
+    [Fact]
     public void Missing_file_gives_defaults()
     {
         var settings = Settings.Load(File_);

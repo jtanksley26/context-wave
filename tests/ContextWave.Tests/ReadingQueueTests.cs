@@ -151,6 +151,83 @@ public class ReadingQueueTests
     }
 
     [Fact]
+    public async Task Next_past_the_last_sentence_finishes_and_raises_Finished_once()
+    {
+        _output.Manual = true;
+        var queue = Create();
+        var finishes = 0;
+        queue.Finished += () => Interlocked.Increment(ref finishes);
+        queue.Load(Make(2));
+        await TestUtil.WaitUntil(() => _output.Pending);
+        queue.Next();
+        await TestUtil.WaitUntil(() => _started.Count == 2 && _output.Pending);
+
+        queue.Next();
+
+        Assert.Equal(1, finishes);
+        Assert.Equal(ReadingState.Idle, queue.State);
+        Assert.Equal(queue.Count, queue.CurrentIndex);
+
+        // A new run waits for the cancelled one to end, so its Finished comes after any the
+        // cancelled one would have raised.
+        _output.Manual = false;
+        var second = NextFinished(queue);
+        queue.Load(Make(1));
+        await second;
+        Assert.Equal(2, finishes);
+    }
+
+    [Fact]
+    public void Next_on_an_empty_queue_raises_nothing()
+    {
+        var queue = Create();
+        var raised = new List<string>();
+        queue.Finished += () => raised.Add("finished");
+        queue.StateChanged += state => raised.Add(state.ToString());
+
+        queue.Next();
+
+        Assert.Empty(raised);
+        Assert.Equal(ReadingState.Idle, queue.State);
+    }
+
+    [Fact]
+    public async Task Previous_on_a_finished_queue_reads_the_last_sentence_again()
+    {
+        var queue = Create();
+        var finished = NextFinished(queue);
+        queue.Load(Make(2));
+        await finished;
+        _output.Manual = true;
+        _started.Clear();
+
+        queue.Previous();
+        await TestUtil.WaitUntil(() => _output.Pending);
+
+        Assert.Equal(1, queue.CurrentIndex);
+        Assert.Equal(ReadingState.Playing, queue.State);
+        Assert.Equal(new[] { 1 }, _started);
+        queue.Stop();
+    }
+
+    [Fact]
+    public async Task Next_on_a_finished_queue_raises_nothing()
+    {
+        var queue = Create();
+        var finished = NextFinished(queue);
+        queue.Load(Make(2));
+        await finished;
+        var raised = new List<string>();
+        queue.Finished += () => raised.Add("finished");
+
+        queue.Next();
+
+        Assert.Empty(raised);
+        Assert.Equal(ReadingState.Idle, queue.State);
+        Assert.Equal(2, queue.CurrentIndex);
+    }
+
+    [Fact]
     public async Task Append_while_idle_starts_at_the_new_sentence()
     {
         var queue = Create();
