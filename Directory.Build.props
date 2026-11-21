@@ -1,0 +1,6 @@
+<Project>
+  <PropertyGroup>
+    <!-- tools\package.ps1 overrides this with the date, and sets SourceRevisionId to the commit. -->
+    <Version>0.0.0-dev</Version>
+  </PropertyGroup>
+</Project>

@@ -25,10 +25,16 @@ New-Item -ItemType Directory -Force "$stage\app" | Out-Null
 # The bridge gets a folder of its own in the package: it and the app depend on different
 # versions of the same libraries, and two self-contained programs in one folder overwrite
 # each other's copies.
+#
+# Every build is stamped with the version and the short commit (-dirty when the tree has
+# uncommitted changes), so a broken install says exactly which build it is.
+$commit = (git -C $root rev-parse --short=7 HEAD).Trim()
+if ($LASTEXITCODE -ne 0) { throw 'Could not read the git commit.' }
+if (git -C $root status --porcelain) { $commit += '-dirty' }
 $outputs = [ordered]@{ 'ContextWave.App' = "$stage\app"; 'ContextWave.Bridge' = "$stage\app\bridge" }
 foreach ($project in $outputs.Keys) {
     dotnet publish "$root\src\$project" -c Release -r win-x64 --self-contained true `
-        "-p:ContextWaveOut=../../out-pkg/$project/" -p:DebugType=none -o $outputs[$project] -v q --nologo
+        "-p:ContextWaveOut=../../out-pkg/$project/" -p:DebugType=none "-p:Version=$Version" "-p:SourceRevisionId=$commit" -o $outputs[$project] -v q --nologo
     if ($LASTEXITCODE -ne 0) { throw "Publishing $project failed." }
 }
 
