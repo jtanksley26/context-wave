@@ -473,7 +473,11 @@ public partial class MainWindow : Window
 
     private void OnDrop(object sender, DragEventArgs e)
     {
-        if (e.Data.GetData(DataFormats.FileDrop) is string[] { Length: > 0 } files) OpenPath(files[0]);
+        if (e.Data.GetData(DataFormats.FileDrop) is not string[] { Length: > 0 } files) return;
+
+        // The same rule as a file dropped on the page, so both drop targets agree.
+        if (PageNavigation.IsOpenablePath(files[0])) OpenPath(files[0]);
+        else StatusText.Text = "Only a file on a drive or network share can be opened.";
     }
 
     private void BuildThemeMenus()

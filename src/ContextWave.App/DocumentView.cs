@@ -42,7 +42,8 @@ public sealed class DocumentView(WebView2 webView)
         core.NewWindowRequested += (_, e) =>
         {
             e.Handled = true;
-            OpenExternal(e.Uri);
+            // A new window is never a file: only web links leave the app.
+            if (PageNavigation.Classify(e.Uri) is PageNavigation.OpenExternal x) OpenExternal(x.Uri);
         };
 
         // Injected rather than linked: the page's content policy allows no script sources.
@@ -178,49 +179,27 @@ public sealed class DocumentView(WebView2 webView)
         }
     }
 
-    /// <summary>
-    /// The page posts a sentence id, "diff:{file}:{line}" (line empty for a header), or
-    /// "text:up", "text:down" or "text:reset".
-    /// </summary>
+    /// <summary>Acts on a message the page posted; see <see cref="PageMessage.Parse"/> for the formats.</summary>
     private void OnMessage(string message)
     {
-        if (int.TryParse(message, out var id))
+        switch (PageMessage.Parse(message))
         {
-            SentenceClicked?.Invoke(id);
-            return;
+            case PageMessage.SentenceClicked m: SentenceClicked?.Invoke(m.Id); break;
+            case PageMessage.TextSize m: TextSizeRequested?.Invoke(m.Step); break;
+            case PageMessage.DiffClicked m: DiffClicked?.Invoke(m.FileIndex, m.Line); break;
         }
-
-        if (message.StartsWith("text:", StringComparison.Ordinal))
-        {
-            int? direction = message["text:".Length..] switch
-            {
-                "up" => 1,
-                "down" => -1,
-                "reset" => 0,
-                _ => null,
-            };
-            if (direction is { } step) TextSizeRequested?.Invoke(step);
-            return;
-        }
-
-        var parts = message.Split(':');
-        if (parts is not ["diff", var file, var line] || !int.TryParse(file, out var fileIndex)) return;
-        if (line == "") DiffClicked?.Invoke(fileIndex, null);
-        else if (int.TryParse(line, out var lineIndex)) DiffClicked?.Invoke(fileIndex, lineIndex);
     }
 
     private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
         e.Cancel = true;
-        if (!Uri.TryCreate(e.Uri, UriKind.Absolute, out var uri)) return;
-        if (uri.IsFile) FileDropped?.Invoke(uri.LocalPath);
-        else OpenExternal(e.Uri);
+        switch (PageNavigation.Classify(e.Uri))
+        {
+            case PageNavigation.OpenFile f: FileDropped?.Invoke(f.Path); break;
+            case PageNavigation.OpenExternal x: OpenExternal(x.Uri); break;
+        }
     }
 
-    private static void OpenExternal(string uri)
-    {
-        if (!Uri.TryCreate(uri, UriKind.Absolute, out var parsed)) return;
-        if (parsed.Scheme != Uri.UriSchemeHttp && parsed.Scheme != Uri.UriSchemeHttps) return;
-        Process.Start(new ProcessStartInfo(parsed.AbsoluteUri) { UseShellExecute = true });
-    }
+    private static void OpenExternal(string uri) =>
+        Process.Start(new ProcessStartInfo(uri) { UseShellExecute = true });
 }

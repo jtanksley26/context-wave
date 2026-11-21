@@ -5,9 +5,13 @@ public static class AppPaths
     /// <summary>Environment variable that, when set and non-empty, replaces the default data folder.</summary>
     public const string HomeVariable = "MDREADER_HOME";
 
-    public static string Root =>
-        Environment.GetEnvironmentVariable(HomeVariable) is { Length: > 0 } home
+    public static string Root => RootFor(Environment.GetEnvironmentVariable(HomeVariable));
+
+    /// <summary>The data folder when the home variable holds <paramref name="home"/> (null or empty: the default).</summary>
+    public static string RootFor(string? home) =>
+        home is { Length: > 0 }
             ? home
+            // Still "MdReader": earlier installs keep their settings and voices there.
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "MdReader");
 
     public static string Models => Path.Combine(Root, "models");

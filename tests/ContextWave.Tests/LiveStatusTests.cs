@@ -93,4 +93,63 @@ public sealed class LiveStatusTests : IDisposable
         var snapshot = LiveSnapshot.Of(null, AudioFrame.Silent);
         Assert.Equal(("idle", 0, 0), (snapshot.State, snapshot.Current, snapshot.Total));
     }
+
+    /// <summary>A front tab reading "One. Two. Three." that stays on its sentence until it is moved.</summary>
+    private static ChatTab ReadingTab()
+    {
+        var tts = new FakeTts();
+        var output = new FakeOutput { Manual = true };
+        var tabs = new ChatTabs(
+            () => new ReadingQueue(tts, output, () => new VoiceSettings("m", 0, 1f), (_, _) => Task.CompletedTask),
+            () => true, () => true, () => "tab", () => "wait", action => action());
+        tabs.Handle(new PipeRequest
+        {
+            Op = "speak_reply", Text = "One. Two. Three.", Session = "s1", Folder = @"C:\work\notes", Process = "1@1",
+        });
+        return tabs.Active!;
+    }
+
+    [Fact]
+    public void The_snapshot_of_a_tab_gives_its_position_text_and_neighbours()
+    {
+        var tab = ReadingTab();
+        tab.Queue.Next();
+        tab.Queue.Pause();
+
+        var snapshot = LiveSnapshot.Of(tab, AudioFrame.Silent with { Level = 0.5f });
+
+        Assert.Equal(("paused", "notes", "reply", "Two."), (snapshot.State, snapshot.Tab, snapshot.Source, snapshot.Sentence));
+        Assert.Equal((2, 3), (snapshot.Current, snapshot.Total));
+        Assert.Equal(0.5f, snapshot.Level);
+        Assert.Equal(["One.", "Two.", "Three."], snapshot.Nearby);
+        Assert.Equal(1, snapshot.At);
+        tab.Queue.Stop();
+    }
+
+    [Fact]
+    public void A_finished_tab_reports_its_last_sentence_not_one_past_it()
+    {
+        var tab = ReadingTab();
+        tab.Queue.Next();
+        tab.Queue.Next();
+        tab.Queue.Next();
+
+        var snapshot = LiveSnapshot.Of(tab, AudioFrame.Silent);
+
+        Assert.Equal(("idle", 3, 3), (snapshot.State, snapshot.Current, snapshot.Total));
+        Assert.Equal("", snapshot.Sentence);
+        Assert.Equal(snapshot.Nearby.Count, snapshot.At);
+        tab.Queue.Stop();
+    }
+
+    [Fact]
+    public void A_pause_or_a_tab_change_is_written_at_once()
+    {
+        var writer = Writer();
+        writer.Publish(Reading());
+        _now += TimeSpan.FromMilliseconds(100);
+        Assert.True(writer.Publish(Reading() with { State = "paused" }));
+        _now += TimeSpan.FromMilliseconds(100);
+        Assert.True(writer.Publish(Reading() with { Tab = "Other chat" }));
+    }
 }

@@ -114,6 +114,8 @@ public sealed class MarkdownDocument(string? imageFolder = null)
     private static bool IsSafeUrl(string? url)
     {
         var trimmed = (url ?? "").Trim();
+        // "//host/x" and "\\host\x" are network paths, not relative links.
+        if (trimmed.StartsWith("//") || trimmed.StartsWith('\\')) return false;
         var end = trimmed.IndexOfAny(['/', '?', '#']);
         var colon = trimmed.IndexOf(':');
         if (colon < 0 || (end >= 0 && end < colon)) return true; // no scheme: relative path or fragment
