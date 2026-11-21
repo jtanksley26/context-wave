@@ -59,11 +59,12 @@ public class ReaderToolsTests
             CurrentSentence = 1,
             TotalSentences = 2,
             DiffFiles = diffFiles,
+            Version = AppVersion.Current,
         })));
         server.Start();
 
-        // The version lines follow; the fake app sends none.
-        Assert.StartsWith(expected + "\napp version: unknown", await Tools(name).Status(CancellationToken.None));
+        // The version line follows.
+        Assert.Equal($"{expected}\nversion: {AppVersion.Current}", await Tools(name).Status(CancellationToken.None));
     }
 
     private static async Task<string> StatusWithVersion(string? version)
@@ -82,18 +83,31 @@ public class ReaderToolsTests
     {
         var text = await StatusWithVersion(AppVersion.Current);
 
-        Assert.Contains($"version: {AppVersion.Current}", text);
+        Assert.EndsWith($"\nversion: {AppVersion.Current}", text);
+        Assert.DoesNotContain("app version", text);
         Assert.DoesNotContain("different builds", text);
     }
 
     [Fact]
-    public async Task A_bridge_from_another_build_says_so()
+    public void A_bridge_from_another_build_says_so()
     {
-        var text = await StatusWithVersion("2026.01.01+aaaaaaa");
+        var text = ReaderTools.VersionLines("2026.01.01+aaaaaaa", "2026.02.02+bbbbbbb");
 
         Assert.Contains("app version: 2026.01.01+aaaaaaa", text);
-        Assert.Contains($"bridge version: {AppVersion.Current}", text);
+        Assert.Contains("bridge version: 2026.02.02+bbbbbbb", text);
         Assert.Contains("different builds", text);
+    }
+
+    [Theory]
+    [InlineData("dev", "2026.02.02+bbbbbbb")]
+    [InlineData("2026.01.01+aaaaaaa", "dev")]
+    public void A_dev_build_on_either_side_is_not_called_a_different_build(string app, string bridge)
+    {
+        var text = ReaderTools.VersionLines(app, bridge);
+
+        Assert.Contains($"app version: {app}", text);
+        Assert.Contains($"bridge version: {bridge}", text);
+        Assert.DoesNotContain("different builds", text);
     }
 
     [Fact]

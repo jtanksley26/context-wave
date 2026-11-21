@@ -13,6 +13,9 @@
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="ContextWave.Tests" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\ContextWave.Core\ContextWave.Core.csproj" />
   </ItemGroup>
   <ItemGroup>

@@ -96,16 +96,16 @@ public sealed class ReaderTools(AppLink link)
         var status =
             $"state: {result.State}\nsource: {result.Source}\nsentence: {result.CurrentSentence} of {result.TotalSentences}";
         if (result.DiffFiles is int files and > 0) status += $"\ndiff: {files} {(files == 1 ? "file" : "files")}";
-        return $"{status}\n{VersionLines(result.Version)}";
+        return $"{status}\n{VersionLines(result.Version, AppVersion.Current)}";
     }
 
     // An app that sends no version is an older build: say so, but do not call it a mismatch.
-    private static string VersionLines(string? appVersion)
+    internal static string VersionLines(string? appVersion, string bridge)
     {
-        var bridge = AppVersion.Current;
         if (appVersion == bridge) return $"version: {bridge}";
         var lines = $"app version: {appVersion ?? "unknown"}\nbridge version: {bridge}";
-        return appVersion is null
+        // A dev build has no commit to compare, so "different" would only mislead.
+        return appVersion is null or "dev" || bridge == "dev"
             ? lines
             : $"{lines}\nnote: the app and the bridge are different builds; reinstall Context Wave.";
     }
