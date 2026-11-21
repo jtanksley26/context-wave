@@ -60,6 +60,9 @@ public sealed record PipeResult
     public int? CurrentSentence { get; init; }
     public int? TotalSentences { get; init; }
     public int? DiffFiles { get; init; }
+
+    /// <summary>The app's build, in a status reply; null from an app that predates it.</summary>
+    public string? Version { get; init; }
 }
 
 public sealed record PipeResponse

@@ -95,8 +95,18 @@ public sealed class ReaderTools(AppLink link)
         if (result.State is null) return result.Message;
         var status =
             $"state: {result.State}\nsource: {result.Source}\nsentence: {result.CurrentSentence} of {result.TotalSentences}";
-        return result.DiffFiles is int files and > 0
-            ? $"{status}\ndiff: {files} {(files == 1 ? "file" : "files")}"
-            : status;
+        if (result.DiffFiles is int files and > 0) status += $"\ndiff: {files} {(files == 1 ? "file" : "files")}";
+        return $"{status}\n{VersionLines(result.Version)}";
+    }
+
+    // An app that sends no version is an older build: say so, but do not call it a mismatch.
+    private static string VersionLines(string? appVersion)
+    {
+        var bridge = AppVersion.Current;
+        if (appVersion == bridge) return $"version: {bridge}";
+        var lines = $"app version: {appVersion ?? "unknown"}\nbridge version: {bridge}";
+        return appVersion is null
+            ? lines
+            : $"{lines}\nnote: the app and the bridge are different builds; reinstall Context Wave.";
     }
 }

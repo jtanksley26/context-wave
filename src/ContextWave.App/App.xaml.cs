@@ -38,6 +38,9 @@ public partial class App : Application
             return;
         }
 
+        // Only the instance that stays: a hand-off from a second launch is not a start.
+        FileLog.Write($"Context Wave {AppVersion.Current} started");
+
         try
         {
             CoreWebView2Environment.GetAvailableBrowserVersionString();

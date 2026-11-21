@@ -59,6 +59,7 @@ public partial class MainWindow : Window
     public MainWindow(string? initialFile)
     {
         InitializeComponent();
+        VersionText.Text = AppVersion.Current;
         _initialFile = initialFile;
         _tts = new SherpaTtsEngine(_models);
         _voice = _settings.ToVoice();

@@ -313,6 +313,7 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
             CurrentSentence = current,
             TotalSentences = total,
             DiffFiles = _diff?.Files.Count ?? 0,
+            Version = AppVersion.Current,
         };
     }
 

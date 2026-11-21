@@ -166,7 +166,7 @@ public sealed class ChatTabs
                 PipeOps.Status => PipeResponse.Success(new PipeResult
                 {
                     Message = "idle, sentence 0 of 0", State = "idle", Source = "",
-                    CurrentSentence = 0, TotalSentences = 0, DiffFiles = 0,
+                    CurrentSentence = 0, TotalSentences = 0, DiffFiles = 0, Version = AppVersion.Current,
                 }),
                 PipeOps.Stop => PipeResponse.Success("Stopped."),
                 _ => PipeResponse.Fail($"Unknown operation '{request.Op}'."),

@@ -429,6 +429,14 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Fact]
+    public void The_status_reply_carries_the_apps_version()
+    {
+        var status = _tabs.Handle(new PipeRequest { Op = "status", Process = "9@9" });
+
+        Assert.Equal(AppVersion.Current, status.Result!.Version);
+    }
+
+    [Fact]
     public void Stop_from_a_chat_without_a_tab_leaves_the_tab_in_front_alone()
     {
         Reply("s1", "One. Two.", "a", "100@1");
