@@ -148,6 +148,39 @@ public class MarkdownDocumentTests
         }
     }
 
+    [Theory]
+    [InlineData(@"<\\host\share\a.png>")]
+    [InlineData("<//host/share/a.png>")]
+    [InlineData("%5C%5Chost%5Cshare%5Ca.png")]
+    [InlineData("%2F%2Fhost%2Fshare%2Fa.png")]
+    [InlineData(@"<\\?\UNC\host\a.png>")]
+    [InlineData("C:/x.png")]
+    public void Images_on_a_network_or_device_path_are_never_read(string destination)
+    {
+        var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
+        try
+        {
+            var html = new MarkdownDocument(imageFolder: dir).Append($"![x]({destination})").Html;
+
+            Assert.Contains("<img", html);
+            Assert.DoesNotContain("data:", html);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("//host/share/x.md")]
+    [InlineData(@"<\\host\share\x.md>")]
+    public void Links_to_a_network_path_are_not_kept_relative(string destination)
+    {
+        var html = Parse($"[x]({destination})").Html;
+
+        Assert.DoesNotContain("host", html);
+    }
+
     [Fact]
     public void Images_are_not_embedded_without_a_document_folder() =>
         Assert.Contains("src=\"cat.png\"", Parse("![A cat](cat.png)").Html);
