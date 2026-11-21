@@ -39,6 +39,18 @@ public sealed class ChatTabsTests : IDisposable
     private PipeResponse Speak(string text, string? process, string? folder = null) =>
         _tabs.Handle(new PipeRequest { Op = "speak", Text = text, Mode = "append", Process = process, Folder = folder });
 
+    private ChatTab ShowDiffFrom(string? folder, string? title = null)
+    {
+        Assert.True(_tabs.Handle(new PipeRequest
+        {
+            Op = "show_diff", Diff = SampleDiff.Foo, Title = title, Process = "100@1", Folder = folder,
+        }).Ok);
+        return _tabs.Tabs.Single();
+    }
+
+    private static readonly string WindowsFolder = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+    private static readonly string WindowsSystem32 = Path.Combine(WindowsFolder, "System32");
+
     private ChatTab Tab(string session) => _tabs.Tabs.Single(t => t.SessionId == session);
 
     /// <summary>Lets each sentence finish as it is played until the condition holds.</summary>
@@ -451,6 +463,14 @@ public sealed class ChatTabsTests : IDisposable
     }
 
     [Fact]
+    public void The_status_reply_carries_the_apps_version()
+    {
+        var status = _tabs.Handle(new PipeRequest { Op = "status", Process = "9@9" });
+
+        Assert.Equal(AppVersion.Current, status.Result!.Version);
+    }
+
+    [Fact]
     public void Stop_from_a_chat_without_a_tab_leaves_the_tab_in_front_alone()
     {
         Reply("s1", "One. Two.", "a", "100@1");
@@ -644,4 +664,54 @@ public sealed class ChatTabsTests : IDisposable
         Assert.NotEmpty(Tab("s2").DiffHtml);
         Assert.Equal(Tab("s2").Session.DiffHtml, Tab("s2").DiffHtml);
     }
+
+    [Theory]
+    [InlineData(@"C:\Windows\System32")]
+    [InlineData(@"c:\windows\system32\")]
+    [InlineData(@"C:\Windows")]
+    public void A_tool_call_from_the_windows_folder_does_not_name_the_tab(string folder)
+    {
+        var tab = ShowDiffFrom(folder);
+
+        Assert.Equal("Claude", tab.Title);
+        Assert.Null(tab.Folder);
+    }
+
+    [Fact]
+    public void A_diff_from_the_windows_folder_names_the_tab_after_its_title()
+    {
+        var tab = ShowDiffFrom(WindowsSystem32, "Arch test diff");
+
+        Assert.Equal("Arch test diff", tab.Title);
+        Assert.Null(tab.Folder);
+    }
+
+    [Fact]
+    public void A_blank_diff_title_falls_back_to_Claude() =>
+        Assert.Equal("Claude", ShowDiffFrom(WindowsSystem32, "  ").Title);
+
+    [Fact]
+    public void A_later_reply_still_renames_a_tab_opened_from_the_windows_folder()
+    {
+        ShowDiffFrom(WindowsSystem32, "Arch test diff");
+
+        Reply("s1", "Hello.", @"D:\Projects\md5reader", "100@1");
+
+        Assert.Equal("md5reader", Tab("s1").Title);
+    }
+
+    [Fact]
+    public void A_reply_from_the_windows_folder_keeps_the_name_the_tab_already_has()
+    {
+        ShowDiffFrom(WindowsSystem32, "Arch test diff");
+
+        Reply("s1", "Hello.", WindowsSystem32, "100@1");
+
+        Assert.Equal("Arch test diff", Tab("s1").Title);
+        Assert.Null(Tab("s1").Folder);
+    }
+
+    [Fact]
+    public void A_real_folder_still_names_the_tab() =>
+        Assert.Equal("md5reader", ShowDiffFrom(@"D:\Projects\md5reader").Title);
 }

@@ -11,3 +11,6 @@ dist/
 node_modules/
 package.json
 package-lock.json
+
+# Worktrees Claude Code makes for subagents.
+.claude/worktrees/

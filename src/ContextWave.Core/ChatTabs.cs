@@ -159,14 +159,17 @@ public sealed class ChatTabs
                 var result = existing.Session.Handle(request);
                 // Being told to stop ends the front tab's turn just as finishing does.
                 if (request.Op == PipeOps.Stop && existing == Active) MoveToNext();
-                return result;
+                // Stamped here once, for every status reply, whichever tab or fallback answers.
+                return request.Op == PipeOps.Status && result is { Ok: true, Result: { } status }
+                    ? result with { Result = status with { Version = AppVersion.Current } }
+                    : result;
             }
             return request.Op switch
             {
                 PipeOps.Status => PipeResponse.Success(new PipeResult
                 {
                     Message = "idle, sentence 0 of 0", State = "idle", Source = "",
-                    CurrentSentence = 0, TotalSentences = 0, DiffFiles = 0,
+                    CurrentSentence = 0, TotalSentences = 0, DiffFiles = 0, Version = AppVersion.Current,
                 }),
                 PipeOps.Stop => PipeResponse.Success("Stopped."),
                 _ => PipeResponse.Fail($"Unknown operation '{request.Op}'."),
@@ -389,6 +392,7 @@ public sealed class ChatTabs
     /// </summary>
     private ChatTab SessionTab(string session, string? folder, string? name, string? process)
     {
+        folder = UsefulFolder(folder);
         if (process is { Length: > 0 }) _sessionByProcess[process] = session;
 
         var key = $"session:{session}";
@@ -404,7 +408,8 @@ public sealed class ChatTabs
         if (folder is { Length: > 0 }) tab.Folder = folder;
         // Renaming the chat in Claude renames its tab with the next reply; a reply without a name keeps it.
         if (name is { Length: > 0 }) tab.ChatName = name;
-        var title = tab.ChatName ?? TitleFor(tab.Folder);
+        // A reply that brings neither a name nor a folder keeps the title the tab was opened with.
+        var title = tab.ChatName ?? (tab.Folder is null ? tab.Title : TitleFor(tab.Folder));
         if (tab.Title != title)
         {
             tab.Title = title;
@@ -423,9 +428,11 @@ public sealed class ChatTabs
             var tab = Find(key);
             if (tab is null && create)
             {
-                tab = Open(key, TitleFor(request.Folder));
+                var folder = UsefulFolder(request.Folder);
+                var title = folder is null && request.Title?.Trim() is { Length: > 0 } diffTitle ? diffTitle : TitleFor(folder);
+                tab = Open(key, title);
                 tab.SessionId = session;
-                tab.Folder = request.Folder;
+                tab.Folder = folder;
             }
             return tab;
         }
@@ -452,6 +459,24 @@ public sealed class ChatTabs
     }
 
     private ChatTab? Find(string key) => _tabs.FirstOrDefault(t => t.Key == key);
+
+    private static string? UsefulFolder(string? folder) =>
+        UsefulFolder(folder, Environment.GetFolderPath(Environment.SpecialFolder.Windows));
+
+    /// <summary>
+    /// The folder, or null for no folder and for the Windows folder or anything in it: Claude starts
+    /// the bridge in System32, which says nothing about the chat.
+    /// </summary>
+    internal static string? UsefulFolder(string? folder, string windowsFolder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return null;
+        var windows = windowsFolder.Replace('/', '\\').TrimEnd('\\');
+        if (windows.Length == 0) return folder;
+        var path = folder.Trim().Replace('/', '\\').TrimEnd('\\');
+        var inWindows = path.Equals(windows, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(windows + "\\", StringComparison.OrdinalIgnoreCase);
+        return inWindows ? null : folder;
+    }
 
     private static string TitleFor(string? folder)
     {
