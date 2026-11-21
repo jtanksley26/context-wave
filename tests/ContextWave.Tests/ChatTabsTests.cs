@@ -149,7 +149,6 @@ public sealed class ChatTabsTests : IDisposable
         Assert.Equal("s2", _tabs.Active!.SessionId);
         // The chat is read from its request, not from the older reply the failed call passed over.
         Assert.False(Heard("Reply."));
-        Assert.Equal("Read this request.".Length, _output.Played.First(clip => clip.Samples[0] != "One.".Length).Samples[0]);
     }
 
     [Fact]

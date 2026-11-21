@@ -7,8 +7,7 @@ public sealed class ClaudeSettingsFileTests : IDisposable
     private const string Exe = @"C:\Apps\ContextWave.Bridge.exe";
 
     // A fresh folder per test, so nothing here can touch the user's real Claude folder.
-    private readonly string _directory = Directory.CreateDirectory(
-        Path.Combine(Path.GetTempPath(), $"ContextWave.Test.{Guid.NewGuid():N}")).FullName;
+    private readonly string _directory = Directory.CreateTempSubdirectory("contextwave-settings-").FullName;
 
     private string SettingsPath => Path.Combine(_directory, "settings.json");
 
@@ -102,6 +101,36 @@ public sealed class ClaudeSettingsFileTests : IDisposable
         Assert.Equal(ClaudeSettingsFile.Outcome.Changed, result.Outcome);
         Assert.False(ClaudeSettings.HasHook(File.ReadAllText(SettingsPath)));
         Assert.Equal([result.BackupPath!], Backups());
+    }
+
+    [Fact]
+    public void Two_changes_in_the_same_second_both_succeed_and_keep_a_backup()
+    {
+        File.WriteAllText(SettingsPath, "{}");
+
+        var install = ClaudeSettingsFile.Update(_directory, Exe, remove: false);
+        var remove = ClaudeSettingsFile.Update(_directory, Exe, remove: true);
+
+        Assert.Equal(ClaudeSettingsFile.Outcome.Changed, install.Outcome);
+        Assert.Equal(ClaudeSettingsFile.Outcome.Changed, remove.Outcome);
+        Assert.NotEqual(install.BackupPath, remove.BackupPath);
+        Assert.Equal(2, Backups().Length);
+    }
+
+    [Fact]
+    public void A_failed_write_leaves_settings_untouched_and_reports_the_backup()
+    {
+        const string text = """{ "theme": "dark" }""";
+        File.WriteAllText(SettingsPath, text);
+        // A folder where the temporary file goes makes the write fail after the backup is made.
+        Directory.CreateDirectory(SettingsPath + ".contextwave-tmp");
+
+        var result = ClaudeSettingsFile.Update(_directory, Exe, remove: false);
+
+        Assert.Equal(ClaudeSettingsFile.Outcome.Failed, result.Outcome);
+        Assert.Equal(text, File.ReadAllText(SettingsPath));
+        Assert.NotNull(result.BackupPath);
+        Assert.True(File.Exists(result.BackupPath));
     }
 
     [Fact]

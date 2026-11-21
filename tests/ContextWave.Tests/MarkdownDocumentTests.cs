@@ -151,18 +151,56 @@ public class MarkdownDocumentTests
     [Theory]
     [InlineData(@"<\\host\share\a.png>")]
     [InlineData("<//host/share/a.png>")]
-    [InlineData("%5C%5Chost%5Cshare%5Ca.png")]
-    [InlineData("%2F%2Fhost%2Fshare%2Fa.png")]
     [InlineData(@"<\\?\UNC\host\a.png>")]
-    [InlineData("C:/x.png")]
-    public void Images_on_a_network_or_device_path_are_never_read(string destination)
+    public void Images_on_a_network_or_device_path_are_dropped_from_the_page(string destination)
     {
         var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
         try
         {
             var html = new MarkdownDocument(imageFolder: dir).Append($"![x]({destination})").Html;
 
+            // The page must never be told to fetch the host, and nothing may be embedded.
             Assert.Contains("<img", html);
+            Assert.DoesNotContain("host", html);
+            Assert.DoesNotContain("data:", html);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("%5C%5Chost%5Cshare%5Ca.png")]
+    [InlineData("%2F%2Fhost%2Fshare%2Fa.png")]
+    public void Escaped_network_paths_in_images_are_never_read(string destination)
+    {
+        var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
+        try
+        {
+            var html = new MarkdownDocument(imageFolder: dir).Append($"![x]({destination})").Html;
+
+            // Left as an inert relative reference (the page has no base URL), but never embedded.
+            Assert.Contains($"src=\"{destination}\"", html);
+            Assert.DoesNotContain("data:", html);
+        }
+        finally
+        {
+            Directory.Delete(dir, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void An_image_on_another_drive_is_never_read()
+    {
+        var dir = Directory.CreateTempSubdirectory("contextwave-images-").FullName;
+        try
+        {
+            var html = new MarkdownDocument(imageFolder: dir).Append("![x](C:/x.png)").Html;
+
+            // A scheme-like drive prefix is stripped from the page, as any unsafe scheme is.
+            Assert.Contains("<img", html);
+            Assert.DoesNotContain("C:", html);
             Assert.DoesNotContain("data:", html);
         }
         finally

@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 
 namespace ContextWave.Bridge;
 
@@ -100,8 +99,7 @@ public static class SetupCommand
                 : "Claude desktop app: registered md-reader. Restart the app to apply.");
             return 0;
         }
-        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException
-                                       or ArgumentException or UnauthorizedAccessException)
+        catch (Exception ex) when (ConfigFile.IsExpectedFailure(ex))
         {
             Console.WriteLine($"Claude desktop app: config left unchanged ({ex.Message}).");
             return 1;

@@ -7,7 +7,10 @@ using ModelContextProtocol.Server;
 namespace ContextWave.Bridge;
 
 [McpServerToolType]
-public sealed class ReaderTools(AppLink link)
+/// <param name="chatProcess">
+/// The key of the chat process that started this bridge; found from the parent process unless a test gives one.
+/// </param>
+public sealed class ReaderTools(AppLink link, Func<string?>? chatProcess = null)
 {
     [McpServerTool(Name = "read_file")]
     [Description(
@@ -68,14 +71,14 @@ public sealed class ReaderTools(AppLink link)
 
     // Claude Code starts one bridge per chat, as a direct child of that chat's process, so the
     // parent identifies the chat. Found once: it does not change while the bridge runs.
-    private static readonly Lazy<string?> ChatProcess = new(ProcessIdentity.ParentKey);
+    private readonly Lazy<string?> _chatProcess = new(chatProcess ?? ProcessIdentity.ParentKey);
 
     private async Task<string> Call(PipeRequest request, CancellationToken ct)
     {
         PipeResponse response;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(ReplyTimeout);
-        request = request with { Process = ChatProcess.Value, Folder = Environment.CurrentDirectory };
+        request = request with { Process = _chatProcess.Value, Folder = Environment.CurrentDirectory };
         try
         {
             response = await link.SendAsync(request, timeout.Token);

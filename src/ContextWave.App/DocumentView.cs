@@ -179,10 +179,7 @@ public sealed class DocumentView(WebView2 webView)
         }
     }
 
-    /// <summary>
-    /// The page posts a sentence id, "diff:{file}:{line}" (line empty for a header), or
-    /// "text:up", "text:down" or "text:reset".
-    /// </summary>
+    /// <summary>Acts on a message the page posted; see <see cref="PageMessage.Parse"/> for the formats.</summary>
     private void OnMessage(string message)
     {
         switch (PageMessage.Parse(message))

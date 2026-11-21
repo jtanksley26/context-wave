@@ -30,8 +30,7 @@ public static class ClaudeSettingsFile
             ConfigFile.WriteAtomically(file, updated);
             return new Result(Outcome.Changed, backup);
         }
-        catch (Exception ex) when (ex is JsonException or InvalidDataException or IOException
-                                       or ArgumentException or UnauthorizedAccessException)
+        catch (Exception ex) when (ConfigFile.IsExpectedFailure(ex))
         {
             return new Result(Outcome.Failed, backup, ex.Message);
         }

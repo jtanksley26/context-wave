@@ -192,6 +192,25 @@ public class ReadingQueueTests
     }
 
     [Fact]
+    public async Task Previous_on_a_finished_queue_reads_the_last_sentence_again()
+    {
+        var queue = Create();
+        var finished = NextFinished(queue);
+        queue.Load(Make(2));
+        await finished;
+        _output.Manual = true;
+        _started.Clear();
+
+        queue.Previous();
+        await TestUtil.WaitUntil(() => _output.Pending);
+
+        Assert.Equal(1, queue.CurrentIndex);
+        Assert.Equal(ReadingState.Playing, queue.State);
+        Assert.Equal(new[] { 1 }, _started);
+        queue.Stop();
+    }
+
+    [Fact]
     public async Task Next_on_a_finished_queue_raises_nothing()
     {
         var queue = Create();

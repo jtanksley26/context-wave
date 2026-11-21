@@ -139,10 +139,11 @@ public sealed class LiveStatusTests : IDisposable
         Assert.Equal(("idle", 3, 3), (snapshot.State, snapshot.Current, snapshot.Total));
         Assert.Equal("", snapshot.Sentence);
         Assert.Equal(snapshot.Nearby.Count, snapshot.At);
+        tab.Queue.Stop();
     }
 
     [Fact]
-    public void A_pause_is_written_at_once()
+    public void A_pause_or_a_tab_change_is_written_at_once()
     {
         var writer = Writer();
         writer.Publish(Reading());
