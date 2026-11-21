@@ -389,6 +389,7 @@ public sealed class ChatTabs
     /// </summary>
     private ChatTab SessionTab(string session, string? folder, string? name, string? process)
     {
+        folder = UsefulFolder(folder);
         if (process is { Length: > 0 }) _sessionByProcess[process] = session;
 
         var key = $"session:{session}";
@@ -404,7 +405,8 @@ public sealed class ChatTabs
         if (folder is { Length: > 0 }) tab.Folder = folder;
         // Renaming the chat in Claude renames its tab with the next reply; a reply without a name keeps it.
         if (name is { Length: > 0 }) tab.ChatName = name;
-        var title = tab.ChatName ?? TitleFor(tab.Folder);
+        // A reply that brings neither a name nor a folder keeps the title the tab was opened with.
+        var title = tab.ChatName ?? (tab.Folder is null ? tab.Title : TitleFor(tab.Folder));
         if (tab.Title != title)
         {
             tab.Title = title;
@@ -423,9 +425,12 @@ public sealed class ChatTabs
             var tab = Find(key);
             if (tab is null && create)
             {
-                tab = Open(key, TitleFor(request.Folder));
+                var folder = UsefulFolder(request.Folder);
+                var title = folder is not null ? TitleFor(folder)
+                    : request.Title?.Trim() is { Length: > 0 } diffTitle ? diffTitle : "Claude";
+                tab = Open(key, title);
                 tab.SessionId = session;
-                tab.Folder = request.Folder;
+                tab.Folder = folder;
             }
             return tab;
         }
@@ -452,6 +457,23 @@ public sealed class ChatTabs
     }
 
     private ChatTab? Find(string key) => _tabs.FirstOrDefault(t => t.Key == key);
+
+    /// <summary>
+    /// False for no folder and for the Windows folder or anything in it: Claude starts the bridge
+    /// in System32, which says nothing about the chat.
+    /// </summary>
+    internal static bool IsUsefulFolder(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return false;
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows).TrimEnd('\\', '/');
+        if (windows.Length == 0) return true;
+        var path = folder.Trim().TrimEnd('\\', '/');
+        return !(path.Equals(windows, StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(windows + "\\", StringComparison.OrdinalIgnoreCase)
+            || path.StartsWith(windows + "/", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? UsefulFolder(string? folder) => IsUsefulFolder(folder) ? folder : null;
 
     private static string TitleFor(string? folder)
     {

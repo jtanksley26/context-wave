@@ -613,4 +613,63 @@ public sealed class ChatTabsTests : IDisposable
         Assert.NotEmpty(Tab("s2").DiffHtml);
         Assert.Equal(Tab("s2").Session.DiffHtml, Tab("s2").DiffHtml);
     }
+
+    private ChatTab ShowDiffFrom(string? folder, string? title = null)
+    {
+        Assert.True(_tabs.Handle(new PipeRequest
+        {
+            Op = "show_diff", Diff = SampleDiff.Foo, Title = title, Process = "100@1", Folder = folder,
+        }).Ok);
+        return _tabs.Tabs.Single();
+    }
+
+    [Theory]
+    [InlineData(@"C:\Windows\System32")]
+    [InlineData(@"c:\windows\system32\")]
+    [InlineData(@"C:\Windows")]
+    public void A_tool_call_from_the_windows_folder_does_not_name_the_tab(string folder)
+    {
+        var tab = ShowDiffFrom(folder);
+
+        Assert.Equal("Claude", tab.Title);
+        Assert.Null(tab.Folder);
+    }
+
+    [Fact]
+    public void A_diff_from_the_windows_folder_names_the_tab_after_its_title()
+    {
+        var tab = ShowDiffFrom(@"C:\Windows\System32", "Arch test diff");
+
+        Assert.Equal("Arch test diff", tab.Title);
+        Assert.Null(tab.Folder);
+    }
+
+    [Fact]
+    public void A_blank_diff_title_falls_back_to_Claude() =>
+        Assert.Equal("Claude", ShowDiffFrom(@"C:\Windows\System32", "  ").Title);
+
+    [Fact]
+    public void A_later_reply_still_renames_a_tab_opened_from_the_windows_folder()
+    {
+        ShowDiffFrom(@"C:\Windows\System32", "Arch test diff");
+
+        Reply("s1", "Hello.", @"D:\Projects\md5reader", "100@1");
+
+        Assert.Equal("md5reader", Tab("s1").Title);
+    }
+
+    [Fact]
+    public void A_reply_from_the_windows_folder_keeps_the_name_the_tab_already_has()
+    {
+        ShowDiffFrom(@"C:\Windows\System32", "Arch test diff");
+
+        Reply("s1", "Hello.", @"C:\Windows\System32", "100@1");
+
+        Assert.Equal("Arch test diff", Tab("s1").Title);
+        Assert.Null(Tab("s1").Folder);
+    }
+
+    [Fact]
+    public void A_real_folder_still_names_the_tab() =>
+        Assert.Equal("md5reader", ShowDiffFrom(@"D:\Projects\md5reader").Title);
 }
