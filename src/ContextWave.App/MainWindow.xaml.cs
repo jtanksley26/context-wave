@@ -20,6 +20,14 @@ public partial class MainWindow : Window
     private readonly ChatTabs _tabs;
     private readonly DocumentView _view;
     private readonly PipeServer _pipe;
+
+    // The voice the reading threads synthesise with. Replaced whole on the UI thread after every
+    // change, so a reader never sees a new model paired with an old speaker.
+    private volatile VoiceSettings _voice;
+
+    // Set when startup fails; the pipe then answers every request with it instead of timing out.
+    private volatile string? _startupError;
+    private bool _pipeStarted;
     private readonly VisualizerFeed _feed;
 
     // Read once: enumerating the system's fonts is slow.
@@ -53,8 +61,9 @@ public partial class MainWindow : Window
         InitializeComponent();
         _initialFile = initialFile;
         _tts = new SherpaTtsEngine(_models);
+        _voice = _settings.ToVoice();
         _tabs = new ChatTabs(
-            () => new ReadingQueue(_tts, _output, _settings.ToVoice),
+            () => new ReadingQueue(_tts, _output, () => _voice),
             () => _settings.AnnounceCodeBlocks, VoiceReady, () => _settings.Replies,
             () => _settings.WhenPlaying, action => Dispatcher.InvokeAsync(() =>
             {
@@ -71,7 +80,9 @@ public partial class MainWindow : Window
         _view = new DocumentView(WebView);
         _pipe = new PipeServer(
             PipeProtocol.DefaultPipeName,
-            request => Dispatcher.InvokeAsync(() => _tabs.Handle(request)).Task);
+            request => _startupError is { } error
+                ? Task.FromResult(PipeResponse.Fail(error))
+                : Dispatcher.InvokeAsync(() => _tabs.Handle(request)).Task);
 
         _tabs.TabOpened += WireTab;
         _tabs.ActiveChanged += ShowTab;
@@ -133,13 +144,13 @@ public partial class MainWindow : Window
                 .FirstOrDefault(v => v.ModelId == _settings.ModelId && v.SpeakerId == _settings.SpeakerId)
                 ?? VoiceBox.Items[0];
 
-            SpeedSlider.Value = _settings.ToVoice().Speed;
-            SpeedText.Text = $"{_settings.ToVoice().Speed:0.0}x";
+            SpeedSlider.Value = _voice.Speed;
+            SpeedText.Text = $"{_voice.Speed:0.0}x";
             AnnounceCodeItem.IsChecked = _settings.AnnounceCodeBlocks;
 
             _ready = true;
             UpdateBanner();
-            _pipe.Start();
+            StartPipe();
             _liveTimer.Start();
             if (_initialFile is not null) OpenPath(Path.GetFullPath(_initialFile));
         }
@@ -148,7 +159,25 @@ public partial class MainWindow : Window
             // Leave the window open so the reason can be read.
             FileLog.Write($"Startup failed: {ex}");
             StatusText.Text = $"Context Wave could not start: {ex.Message}";
+            // Answer Claude with the reason; with no pipe every call would time out and start
+            // another copy of the app that cannot run either.
+            _startupError = StatusText.Text;
+            try
+            {
+                StartPipe();
+            }
+            catch (Exception pipeError)
+            {
+                FileLog.Write($"The pipe could not start either: {pipeError}");
+            }
         }
+    }
+
+    private void StartPipe()
+    {
+        if (_pipeStarted) return;
+        _pipe.Start();
+        _pipeStarted = true;
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -618,7 +647,8 @@ public partial class MainWindow : Window
     {
         if (!_ready) return;
         _settings.Speed = (float)Math.Round(e.NewValue, 1);
-        SpeedText.Text = $"{_settings.Speed:0.0}x";
+        _voice = _settings.ToVoice();
+        SpeedText.Text = $"{_voice.Speed:0.0}x";
         SaveSettings();
         foreach (var tab in _tabs.Tabs) tab.Queue.InvalidateCache();
     }
@@ -628,6 +658,7 @@ public partial class MainWindow : Window
         if (!_ready || VoiceBox.SelectedItem is not VoiceOption voice) return;
         _settings.ModelId = voice.ModelId;
         _settings.SpeakerId = voice.SpeakerId;
+        _voice = _settings.ToVoice();
         SaveSettings();
         // Pause first: once paused, a synthesis that fails for want of the voice is held and
         // retried on Play instead of being skipped.

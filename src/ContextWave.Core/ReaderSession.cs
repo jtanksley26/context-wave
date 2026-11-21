@@ -51,6 +51,9 @@ public sealed class ReaderSession(ReadingQueue queue, Func<bool> announceCodeBlo
     /// <summary>The title given with the loaded diff, or null.</summary>
     public string? DiffTitle { get; private set; }
 
+    /// <summary>The shown diff's HTML, or "" when there is none.</summary>
+    public string DiffHtml => _diff?.Html ?? "";
+
     public event Action<string>? DocumentReplaced;
     public event Action<string>? DocumentAppended;
 

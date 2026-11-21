@@ -49,6 +49,30 @@ public sealed class ReaderSessionTests : IDisposable
     /// <summary>A reply, held, waiting or interrupting as <see cref="_action"/> says (the tabs decide which).</summary>
     private PipeResponse Reply(string text) => PipeResponse.Success(_session.SpeakReply(text, _action));
 
+    [Theory]
+    [MemberData(nameof(ReadingOps))]
+    public void Every_reading_op_is_handled_by_the_session(string op)
+    {
+        var path = Write("notes.md", "One.");
+        var response = _session.Handle(new PipeRequest { Op = op, Path = path, Text = "One.", Diff = SampleDiff.Foo });
+
+        Assert.True(PipeOps.IsReading(op));
+        Assert.DoesNotContain("Unknown operation", response.Error ?? "");
+    }
+
+    public static TheoryData<string> ReadingOps() => [.. PipeOps.Reading];
+
+    [Fact]
+    public void Diff_html_and_title_come_from_the_session_and_clear_with_it()
+    {
+        _session.Handle(new PipeRequest { Op = "show_diff", Diff = SampleDiff.Foo, Title = "PR 1" });
+        Assert.Equal((_diffs[^1].Html, "PR 1"), (_session.DiffHtml, _session.DiffTitle));
+        Assert.NotEmpty(_session.DiffHtml);
+
+        _session.Handle(new PipeRequest { Op = "read_file", Path = Write("notes.md", "One.") });
+        Assert.Equal(("", null), (_session.DiffHtml, _session.DiffTitle));
+    }
+
     [Fact]
     public void A_first_reply_does_not_announce_code_blocks_when_the_setting_is_off()
     {

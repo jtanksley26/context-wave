@@ -603,5 +603,6 @@ public sealed class ChatTabsTests : IDisposable
 
         await PlayUntil(() => _tabs.Active!.SessionId == "s3" && IsDoneReading(Tab("s3")));
         Assert.NotEmpty(Tab("s2").DiffHtml);
+        Assert.Equal(Tab("s2").Session.DiffHtml, Tab("s2").DiffHtml);
     }
 }

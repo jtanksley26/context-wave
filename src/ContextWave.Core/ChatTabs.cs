@@ -23,11 +23,6 @@ public sealed class ChatTab
             Replacements++;
         };
         session.DocumentAppended += html => _html.Append(html);
-        session.DiffReplaced += (html, title) =>
-        {
-            DiffHtml = html;
-            DiffTitle = title;
-        };
     }
 
     /// <summary>"session:&lt;id&gt;", "process:&lt;key&gt;", "file:&lt;path&gt;" or "claude".</summary>
@@ -71,8 +66,10 @@ public sealed class ChatTab
     /// <summary>True when no document is showing; cheaper than building <see cref="Html"/> to check.</summary>
     public bool IsEmpty => _html.Length == 0;
 
-    public string DiffHtml { get; private set; } = "";
-    public string? DiffTitle { get; private set; }
+    /// <summary>The shown diff's HTML, or "" when there is none; the session owns it.</summary>
+    public string DiffHtml => Session.DiffHtml;
+
+    public string? DiffTitle => Session.DiffTitle;
 }
 
 /// <summary>
@@ -154,7 +151,7 @@ public sealed class ChatTabs
         }
 
         var existing = ToolTab(request, create: false);
-        if (request.Op is not (PipeOps.ReadFile or PipeOps.Speak or PipeOps.ShowDiff))
+        if (!PipeOps.IsReading(request.Op))
         {
             // Status and stop never open a tab or reach another chat's tab.
             if (existing is not null)
