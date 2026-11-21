@@ -181,16 +181,29 @@ public static class SetupCommand
         }
     }
 
-    /// <summary>Runs a command line through cmd.exe (claude is a .cmd shim) and captures its output.</summary>
-    private static CommandResult RunCmd(string commandLine)
+    /// <summary>
+    /// How <see cref="RunCmd"/> starts cmd.exe. Setup may be run from a terminal open in any folder, such as
+    /// a cloned repository, and cmd.exe looks in the current folder before PATH. A planted cmd.exe,
+    /// where.bat or claude.bat there would run as the user, so none of the three is looked up there.
+    /// </summary>
+    public static ProcessStartInfo CommandStart(string commandLine)
     {
-        using var process = Process.Start(new ProcessStartInfo("cmd.exe", $"/c {commandLine}")
+        var start = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "cmd.exe"), $"/c {commandLine}")
         {
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-        })!;
+            WorkingDirectory = AppContext.BaseDirectory,
+        };
+        start.Environment["NoDefaultCurrentDirectoryInExePath"] = "1";
+        return start;
+    }
+
+    /// <summary>Runs a command line through cmd.exe (claude is a .cmd shim) and captures its output.</summary>
+    private static CommandResult RunCmd(string commandLine)
+    {
+        using var process = Process.Start(CommandStart(commandLine))!;
 
         // Both streams are drained concurrently: reading them one after the other can deadlock
         // once the child fills the pipe that is not being read.
